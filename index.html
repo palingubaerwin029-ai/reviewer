@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ReviewerPro — Flashcard & Quiz Study Tool</title>
+
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+  <!-- PDF.js -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <script>
+    if (typeof pdfjsLib !== 'undefined') {
+      pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    }
+  </script>
+
+  <!-- Mammoth.js (DOCX) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
+
+  <!-- Chart.js -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+
+  <!-- Stylesheets -->
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="css/cards.css">
+  <link rel="stylesheet" href="css/quiz.css">
+
+  <!-- Favicon -->
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📚</text></svg>">
+</head>
+<body>
+  <div class="app-layout">
+
+    <!-- Mobile Menu Toggle -->
+    <button class="menu-toggle" aria-label="Toggle menu">☰</button>
+
+    <!-- Sidebar Overlay (mobile) -->
+    <div class="sidebar-overlay"></div>
+
+    <!-- Sidebar Navigation -->
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <div class="sidebar-logo">
+          <span>📚</span>
+          <span>ReviewerPro</span>
+        </div>
+      </div>
+
+      <nav class="sidebar-nav">
+        <button class="nav-item active" data-page="dashboard">
+          <span>🏠</span> Dashboard
+        </button>
+        <button class="nav-item" data-page="reviewer">
+          <span>📝</span> Reviewer
+        </button>
+        <button class="nav-item" data-page="flashcards">
+          <span>🃏</span> Flashcards
+        </button>
+        <button class="nav-item" data-page="quiz">
+          <span>📋</span> Quiz
+        </button>
+        <button class="nav-item" data-page="progress">
+          <span>📊</span> Progress
+        </button>
+        <button class="nav-item" data-page="settings">
+          <span>⚙️</span> Settings
+        </button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <button class="nav-item" onclick="App.toggleTheme()" title="Toggle theme">
+          <span>🌙</span> Toggle Theme
+        </button>
+      </div>
+    </aside>
+
+    <!-- Main Content Area -->
+    <main class="main-content">
+      <div id="page-dashboard" class="page active"></div>
+      <div id="page-reviewer" class="page"></div>
+      <div id="page-flashcards" class="page"></div>
+      <div id="page-quiz" class="page"></div>
+      <div id="page-progress" class="page"></div>
+      <div id="page-settings" class="page"></div>
+    </main>
+
+  </div>
+
+  <!-- Toast Container -->
+  <div class="toast-container"></div>
+
+  <!-- Scripts (order matters) -->
+  <script src="js/storage.js"></script>
+  <script src="js/fileparser.js"></script>
+  <script src="js/generator.js"></script>
+  <script src="js/dashboard.js"></script>
+  <script src="js/reviewer.js"></script>
+  <script src="js/flashcards.js"></script>
+  <script src="js/quiz.js"></script>
+  <script src="js/progress.js"></script>
+  <script src="js/settings.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

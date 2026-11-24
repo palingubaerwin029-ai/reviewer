@@ -1,0 +1,311 @@
+/* ============================================================
+   cards.css — Flashcard flip animations & study mode styles
+   ============================================================ */
+
+/* ---- Flashcard Container ---- */
+.flashcard-study {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 24px;
+  max-width: 640px;
+  margin: 0 auto;
+}
+
+/* ---- Flip Card ---- */
+.flip-card {
+  width: 100%;
+  max-width: 560px;
+  height: 320px;
+  perspective: 1200px;
+  cursor: pointer;
+}
+
+.flip-card-inner {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  transition: transform 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+  transform-style: preserve-3d;
+}
+
+.flip-card.flipped .flip-card-inner {
+  transform: rotateY(180deg);
+}
+
+.flip-card-front,
+.flip-card-back {
+  position: absolute;
+  inset: 0;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
+  text-align: center;
+  overflow-y: auto;
+}
+
+.flip-card-front {
+  background: linear-gradient(135deg, var(--bg-card) 0%, var(--bg-secondary) 100%);
+}
+
+.flip-card-back {
+  background: linear-gradient(135deg, var(--accent-light) 0%, var(--bg-card) 100%);
+  transform: rotateY(180deg);
+  border-color: var(--accent);
+}
+
+.flip-card-label {
+  position: absolute;
+  top: 16px;
+  left: 20px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--text-muted);
+}
+
+.flip-card-front .flip-card-label { color: var(--text-muted); }
+.flip-card-back .flip-card-label { color: var(--accent); }
+
+.flip-card-text {
+  font-size: 1.3rem;
+  font-weight: 600;
+  line-height: 1.5;
+  max-width: 100%;
+  word-wrap: break-word;
+}
+
+.flip-card-back .flip-card-text {
+  font-size: 1.15rem;
+  font-weight: 500;
+}
+
+.flip-hint {
+  position: absolute;
+  bottom: 16px;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* ---- Card Counter ---- */
+.card-counter {
+  font-size: 0.95rem;
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.card-counter span {
+  color: var(--accent);
+}
+
+/* ---- Study Controls ---- */
+.study-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.study-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px 24px;
+  border-radius: var(--radius-sm);
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text-primary);
+  transition: all var(--transition);
+  font-family: var(--font);
+}
+
+.study-btn:hover {
+  border-color: var(--accent);
+  transform: translateY(-1px);
+}
+
+.study-btn.nav-btn {
+  padding: 12px 16px;
+}
+
+.study-btn svg { width: 18px; height: 18px; }
+
+/* ---- Grade Buttons ---- */
+.grade-controls {
+  display: flex;
+  gap: 16px;
+  margin-top: 8px;
+}
+
+.grade-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 32px;
+  border-radius: var(--radius);
+  font-size: 1rem;
+  font-weight: 700;
+  cursor: pointer;
+  border: 2px solid transparent;
+  transition: all var(--transition);
+  font-family: var(--font);
+}
+
+.grade-btn.correct {
+  background: var(--success-bg);
+  color: var(--success);
+  border-color: var(--success);
+}
+
+.grade-btn.correct:hover {
+  background: var(--success);
+  color: #fff;
+  transform: scale(1.05);
+}
+
+.grade-btn.wrong {
+  background: var(--danger-bg);
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+.grade-btn.wrong:hover {
+  background: var(--danger);
+  color: #fff;
+  transform: scale(1.05);
+}
+
+/* ---- Study Progress ---- */
+.study-progress {
+  width: 100%;
+  max-width: 560px;
+}
+
+.study-progress-info {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+/* ---- Session Summary ---- */
+.session-summary {
+  text-align: center;
+  max-width: 480px;
+  margin: 0 auto;
+  padding: 40px 20px;
+}
+
+.session-summary h2 {
+  font-size: 1.5rem;
+  margin-bottom: 8px;
+}
+
+.session-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin: 24px 0;
+}
+
+.session-stat {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+}
+
+.session-stat .value {
+  font-size: 2rem;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.session-stat .label {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  margin-top: 4px;
+}
+
+/* ---- Card List (edit view) ---- */
+.card-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.card-list-item {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  transition: all var(--transition);
+}
+
+.card-list-item:hover {
+  border-color: var(--accent);
+}
+
+.card-list-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.card-list-front {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.card-list-back {
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+}
+
+.card-list-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+/* ---- Responsive ---- */
+@media (max-width: 640px) {
+  .flip-card {
+    height: 260px;
+  }
+
+  .flip-card-text {
+    font-size: 1.1rem;
+  }
+
+  .grade-controls {
+    flex-direction: column;
+    width: 100%;
+  }
+
+  .grade-btn {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .session-stats {
+    grid-template-columns: 1fr;
+  }
+}
