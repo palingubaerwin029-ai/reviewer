@@ -160,28 +160,51 @@ const Quiz = (() => {
     if (!deck) return;
 
     const count = parseInt(document.getElementById('quiz-count')?.value) || 10;
-    const types = [...document.querySelectorAll('.type-checkbox input:checked')].map(cb => cb.value);
+    const types = [...document.querySelectorAll('#page-quiz .type-checkbox input:checked')].map(cb => cb.value);
     const useTimer = document.getElementById('quiz-timer-toggle')?.checked;
     const timerSeconds = parseInt(document.getElementById('quiz-timer-seconds')?.value) || 30;
 
     if (types.length === 0) { App.toast('Select at least one question type.', 'error'); return; }
 
-    // Filter and shuffle questions
-    let pool = deck.quizQuestions.filter(q => types.includes(q.type));
-    if (pool.length === 0) {
+    // Group matching questions by checked type and shuffle each group
+    const shuffle = (arr) => {
+      for (let i = arr.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+      }
+      return arr;
+    };
+
+    const buckets = types
+      .map(t => shuffle(deck.quizQuestions.filter(q => q.type === t)))
+      .filter(b => b.length > 0);
+
+    const totalAvailable = buckets.reduce((sum, b) => sum + b.length, 0);
+    if (totalAvailable === 0) {
       App.toast('No questions match the selected types. Please select more question types.', 'error');
       return;
     }
 
-    if (pool.length < count) {
-      App.toast(`Starting quiz with all ${pool.length} available questions matching selected types.`, 'info');
+    if (totalAvailable < count) {
+      App.toast(`Starting quiz with all ${totalAvailable} available questions matching selected types.`, 'info');
     }
 
-    for (let i = pool.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [pool[i], pool[j]] = [pool[j], pool[i]];
+    // Round-robin pick across checked categories so every checked type appears, then shuffle slide order
+    const targetCount = Math.min(count, totalAvailable);
+    const selected = [];
+    let round = 0;
+    while (selected.length < targetCount) {
+      let addedInRound = false;
+      for (const bucket of buckets) {
+        if (round < bucket.length && selected.length < targetCount) {
+          selected.push(bucket[round]);
+          addedInRound = true;
+        }
+      }
+      if (!addedInRound) break;
+      round++;
     }
-    const questions = pool.slice(0, count);
+    const questions = shuffle(selected);
 
     state = {
       deck,
