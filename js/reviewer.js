@@ -311,6 +311,15 @@ const Reviewer = (() => {
         });
       });
     });
+
+    // Hide modal API key input automatically if server env key is configured
+    if (!settings.groqApiKey && typeof Generator !== 'undefined' && Generator.getServerEnvStatus) {
+      Generator.getServerEnvStatus().then(env => {
+        if (env.hasGroqEnv) {
+          document.getElementById('gen-key-group')?.classList.add('hidden');
+        }
+      });
+    }
   }
 
   function renderNotesTab(deck) {
@@ -626,8 +635,10 @@ ${deck.notes ? escapeHtml(deck.notes) : '<span class="text-muted">No notes added
     const settings = Storage.getSettings();
     const provider = settings.aiProvider || 'groq';
     const key = provider === 'groq' ? (settings.groqApiKey || '').trim() : (settings.apiKey || '').trim();
+    const envStatus = await Generator.getServerEnvStatus();
+    const hasEnvKey = provider === 'groq' ? envStatus.hasGroqEnv : envStatus.hasGeminiEnv;
 
-    if (!key) {
+    if (!key && !hasEnvKey) {
       const keyGroup = document.getElementById('gen-key-group');
       if (keyGroup) {
         keyGroup.classList.remove('hidden');

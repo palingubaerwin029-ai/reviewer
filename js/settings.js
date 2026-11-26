@@ -53,9 +53,9 @@ const Settings = (() => {
               <option value="llama-3.2-3b-preview" ${settings.groqModel === 'llama-3.2-3b-preview' ? 'selected' : ''}>llama-3.2-3b-preview</option>
             </select>
           </div>
-          <div style="margin-top:12px;">
+          <div style="margin-top:12px;" id="settings-groq-status">
             ${settings.groqApiKey ?
-              '<span class="tag green">✅ Groq configured</span>' :
+              '<span class="tag green">✅ Groq configured (custom key)</span>' :
               '<span class="tag red">⚠️ Enter your Groq API key above</span>'
             }
           </div>
@@ -85,9 +85,9 @@ const Settings = (() => {
               <option value="gemini-1.5-pro" ${settings.model === 'gemini-1.5-pro' ? 'selected' : ''}>gemini-1.5-pro</option>
             </select>
           </div>
-          <div style="margin-top:12px;">
+          <div style="margin-top:12px;" id="settings-gemini-status">
             ${settings.apiKey ?
-              '<span class="tag green">✅ Gemini configured</span>' :
+              '<span class="tag green">✅ Gemini configured (custom key)</span>' :
               '<span class="tag red">⚠️ No Gemini key set</span>'
             }
           </div>
@@ -151,6 +151,20 @@ const Settings = (() => {
         <button class="btn btn-primary btn-lg w-full" onclick="Settings.save()">💾 Save Settings</button>
       </div>
     `;
+
+    // Show server environment variable status if configured on Vercel
+    if (typeof Generator !== 'undefined' && Generator.getServerEnvStatus) {
+      Generator.getServerEnvStatus().then(env => {
+        const groqStatus = document.getElementById('settings-groq-status');
+        if (groqStatus && !settings.groqApiKey && env.hasGroqEnv) {
+          groqStatus.innerHTML = '<span class="tag green">✅ Using server env (GROQ_API_KEY)</span>';
+        }
+        const geminiStatus = document.getElementById('settings-gemini-status');
+        if (geminiStatus && !settings.apiKey && env.hasGeminiEnv) {
+          geminiStatus.innerHTML = '<span class="tag green">✅ Using server env (GEMINI_API_KEY)</span>';
+        }
+      });
+    }
   }
 
   function onProviderChange() {

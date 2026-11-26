@@ -6,21 +6,48 @@ const Generator = (() => {
   const GEMINI_FALLBACK_MODELS = ['gemini-3.8-flash', 'gemini-2.5-flash', 'gemini-1.5-flash'];
   let cachedGroqModels = null;
   let cachedGroqModelsAt = 0;
+  let cachedEnvStatus = null;
   const modelCooldownUntil = {};
   let lastGroqModelUsed = null;
   let lastCallTokens = 0;
 
+  // ---- Check if Vercel server environment variables are configured ----
+  async function getServerEnvStatus() {
+    if (cachedEnvStatus) return cachedEnvStatus;
+    if (typeof window === 'undefined' || !window.location || window.location.protocol === 'file:') {
+      cachedEnvStatus = { hasGroqEnv: false, hasGeminiEnv: false };
+      return cachedEnvStatus;
+    }
+    try {
+      const res = await fetch('/api/ai?action=status');
+      if (res.ok) {
+        const data = await res.json();
+        cachedEnvStatus = {
+          hasGroqEnv: Boolean(data.hasGroqEnv),
+          hasGeminiEnv: Boolean(data.hasGeminiEnv),
+        };
+        return cachedEnvStatus;
+      }
+    } catch {
+      // Static local server without /api route
+    }
+    cachedEnvStatus = { hasGroqEnv: false, hasGeminiEnv: false };
+    return cachedEnvStatus;
+  }
+
   // ---- Dynamically query live active models from Groq ----
-  async function fetchGroqChatModels(apiKey) {
+  async function fetchGroqChatModels(apiKey, useServerProxy = false) {
     if (cachedGroqModels && (Date.now() - cachedGroqModelsAt) < 300000) {
       return cachedGroqModels;
     }
     try {
-      const response = await fetch('https://api.groq.com/openai/v1/models', {
-        headers: {
-          'Authorization': `Bearer ${apiKey.trim()}`,
-        },
-      });
+      const response = useServerProxy
+        ? await fetch('/api/ai?action=models')
+        : await fetch('https://api.groq.com/openai/v1/models', {
+            headers: {
+              'Authorization': `Bearer ${apiKey.trim()}`,
+            },
+          });
       if (response.ok) {
         const data = await response.json();
         const allModels = (data.data || []).map(m => m.id);
@@ -50,15 +77,58 @@ const Generator = (() => {
     }
   }
 
-  // ---- Groq LLM API (with multi-model 429 rotation) ----
+  function sendGroqChatRequest(model, prompt, apiKey, useServerProxy) {
+    if (useServerProxy) {
+      return fetch('/api/ai', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider: 'groq',
+          model,
+          prompt,
+          systemPrompt: 'Study generator. Output compact valid json matching exact requested counts.',
+          temperature: 0.3,
+          max_tokens: 4096,
+        }),
+      });
+    }
+    return fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          {
+            role: 'system',
+            content: 'Study generator. Output compact valid json matching exact requested counts.',
+          },
+          {
+            role: 'user',
+            content: prompt,
+          },
+        ],
+        response_format: { type: 'json_object' },
+        temperature: 0.3,
+        max_tokens: 4096,
+      }),
+    });
+  }
+
+  // ---- Groq LLM API (with multi-model 429 rotation & env proxy support) ----
   async function callGroq(prompt, onStatus) {
     const settings = Storage.getSettings();
     const apiKey = (settings.groqApiKey || '').trim();
-    if (!apiKey) {
-      throw new Error('No Groq API key set. Please add your free Groq API key in Settings.');
+    const envStatus = await getServerEnvStatus();
+    const useServerProxy = !apiKey && envStatus.hasGroqEnv;
+
+    if (!apiKey && !useServerProxy) {
+      throw new Error('No Groq API key set. Add GROQ_API_KEY in Vercel env or enter your key in Settings.');
     }
 
-    const liveModels = await fetchGroqChatModels(apiKey);
+    const liveModels = await fetchGroqChatModels(apiKey, useServerProxy);
 
     let preferred = settings.groqModel;
     if (!preferred || !liveModels.includes(preferred)) {
@@ -96,29 +166,7 @@ const Generator = (() => {
           onStatus?.(`Generating with Groq (${model})...`);
         }
 
-        const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${apiKey}`,
-          },
-          body: JSON.stringify({
-            model,
-            messages: [
-              {
-                role: 'system',
-                content: 'Study generator. Output compact valid json matching exact requested counts.',
-              },
-              {
-                role: 'user',
-                content: prompt,
-              },
-            ],
-            response_format: { type: 'json_object' },
-            temperature: 0.3,
-            max_tokens: 4096,
-          }),
-        });
+        const response = await sendGroqChatRequest(model, prompt, apiKey, useServerProxy);
 
         if (!response.ok) {
           const err = await response.json().catch(() => ({}));
@@ -126,7 +174,7 @@ const Generator = (() => {
           console.warn(`Groq attempt with ${model} failed:`, msg);
 
           if (response.status === 401) {
-            throw new Error('Invalid Groq API key. Please check your API key in Settings.');
+            throw new Error('Invalid Groq API key. Please check your API key in Settings or Vercel env.');
           }
 
           const isRateLimit = response.status === 429 ||
@@ -144,23 +192,7 @@ const Generator = (() => {
             const waitMs = Math.min(Math.max(retryAfter * 1000, 3000), 10000);
             onStatus?.(`Rate limit pause (${Math.ceil(waitMs / 1000)}s)...`);
             await new Promise(r => setTimeout(r, waitMs));
-            const retryRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${apiKey}`,
-              },
-              body: JSON.stringify({
-                model,
-                messages: [
-                  { role: 'system', content: 'Study generator. Output compact valid json matching exact requested counts.' },
-                  { role: 'user', content: prompt },
-                ],
-                response_format: { type: 'json_object' },
-                temperature: 0.3,
-                max_tokens: 4096,
-              }),
-            });
+            const retryRes = await sendGroqChatRequest(model, prompt, apiKey, useServerProxy);
             if (retryRes.ok) {
               const retryData = await retryRes.json();
               const retryText = retryData.choices?.[0]?.message?.content;
@@ -212,11 +244,15 @@ const Generator = (() => {
     throw lastError || new Error('Could not connect to Groq models.');
   }
 
-  // ---- Gemini API ----
+  // ---- Gemini API (with env proxy support) ----
   async function callGemini(prompt, onStatus) {
     const settings = Storage.getSettings();
-    if (!settings.apiKey) {
-      throw new Error('No Gemini API key set. Please add your Gemini API key in Settings.');
+    const apiKey = (settings.apiKey || '').trim();
+    const envStatus = await getServerEnvStatus();
+    const useServerProxy = !apiKey && envStatus.hasGeminiEnv;
+
+    if (!apiKey && !useServerProxy) {
+      throw new Error('No Gemini API key set. Add GEMINI_API_KEY in Vercel env or enter your key in Settings.');
     }
 
     const preferredModel = settings.model || 'gemini-3.8-flash';
@@ -234,19 +270,31 @@ const Generator = (() => {
             onStatus?.(`Connecting to ${currentModel}${attempt > 1 ? ` (retry ${attempt})` : ''}...`);
           }
 
-          const response = await fetch(`${apiUrl}?key=${settings.apiKey.trim()}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              contents: [{ parts: [{ text: prompt }] }],
-              generationConfig: {
-                temperature: 0.3,
-                topP: 0.9,
-                maxOutputTokens: 4096,
-                responseMimeType: 'application/json',
-              },
-            }),
-          });
+          const response = useServerProxy
+            ? await fetch('/api/ai', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  provider: 'gemini',
+                  model: currentModel,
+                  prompt,
+                  temperature: 0.3,
+                  max_tokens: 4096,
+                }),
+              })
+            : await fetch(`${apiUrl}?key=${apiKey}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  contents: [{ parts: [{ text: prompt }] }],
+                  generationConfig: {
+                    temperature: 0.3,
+                    topP: 0.9,
+                    maxOutputTokens: 4096,
+                    responseMimeType: 'application/json',
+                  },
+                }),
+              });
 
           if (!response.ok) {
             const err = await response.json().catch(() => ({}));
@@ -312,12 +360,13 @@ const Generator = (() => {
   async function callAI(prompt, onStatus) {
     const settings = Storage.getSettings();
     const provider = settings.aiProvider || 'groq';
+    const envStatus = await getServerEnvStatus();
 
     if (provider === 'gemini') {
       try {
         return await callGemini(prompt, onStatus);
       } catch (err) {
-        if ((settings.groqApiKey || '').trim() && !err.message.includes('API key')) {
+        if (((settings.groqApiKey || '').trim() || envStatus.hasGroqEnv) && !err.message.includes('API key')) {
           onStatus?.('Gemini busy, switching to Groq...');
           return callGroq(prompt, onStatus);
         }
@@ -327,7 +376,7 @@ const Generator = (() => {
       try {
         return await callGroq(prompt, onStatus);
       } catch (err) {
-        if ((settings.apiKey || '').trim() && !err.message.includes('API key')) {
+        if (((settings.apiKey || '').trim() || envStatus.hasGeminiEnv) && !err.message.includes('API key')) {
           onStatus?.('Groq rate-limited, switching to Gemini...');
           return callGemini(prompt, onStatus);
         }
@@ -695,5 +744,6 @@ const Generator = (() => {
     generateFlashcards,
     generateQuizQuestions,
     generateAll,
+    getServerEnvStatus,
   };
 })();
