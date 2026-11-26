@@ -316,11 +316,22 @@ const Generator = (() => {
     return chunks;
   }
 
+  function extractArray(result, preferredKeys) {
+    if (Array.isArray(result)) return result;
+    if (!result || typeof result !== 'object') return [];
+    for (const key of preferredKeys) {
+      if (Array.isArray(result[key])) return result[key];
+    }
+    const firstArr = Object.values(result).find(v => Array.isArray(v));
+    return Array.isArray(firstArr) ? firstArr : [];
+  }
+
   function normalizeCard(c) {
+    if (!c || typeof c !== 'object') return { front: '', back: '' };
     return {
       id: Storage.uuid(),
-      front: (c.f || c.front || c.question || c.term || '').trim(),
-      back: (c.b || c.back || c.answer || c.definition || '').trim(),
+      front: String(c.front ?? c.f ?? c.question ?? c.q ?? c.term ?? c.prompt ?? '').trim(),
+      back: String(c.back ?? c.b ?? c.answer ?? c.a ?? c.definition ?? c.def ?? '').trim(),
       mastery: 0,
       lastReviewed: null,
       timesCorrect: 0,
@@ -328,42 +339,69 @@ const Generator = (() => {
     };
   }
 
+  function normalizeQuestionType(rawType, allowedTypes) {
+    const raw = String(rawType || '').toLowerCase().trim();
+    const mapped = CODE_TO_TYPE[raw] || (
+      raw.includes('multiple') || raw === 'mcq' ? 'multiple_choice' :
+      raw.includes('true') || raw.includes('false') || raw === 't/f' ? 'true_false' :
+      raw.includes('fill') || raw.includes('blank') || raw === 'fib' ? 'fill_blank' :
+      raw.includes('ident') ? 'identification' :
+      raw
+    );
+    return allowedTypes.includes(mapped) ? mapped : (allowedTypes[0] || 'multiple_choice');
+  }
+
   function normalizeQuestion(q, allowedTypes) {
-    const rawType = CODE_TO_TYPE[q.t] || q.t || q.type;
-    const type = allowedTypes.includes(rawType) ? rawType : (allowedTypes[0] || 'multiple_choice');
+    if (!q || typeof q !== 'object') return { question: '', answer: '' };
+    const type = normalizeQuestionType(q.type ?? q.t, allowedTypes);
+    const rawOptions = q.options ?? q.o ?? q.choices ?? [];
+    const options = Array.isArray(rawOptions) ? rawOptions.map(o => String(o).trim()).filter(Boolean) : [];
     return {
       id: Storage.uuid(),
       type,
-      question: (q.q || q.question || '').trim(),
-      options: q.o || q.options || [],
-      answer: String(q.a ?? q.answer ?? '').trim(),
-      explanation: (q.e || q.explanation || '').trim(),
+      question: String(q.question ?? q.q ?? q.prompt ?? q.front ?? '').trim(),
+      options,
+      answer: String(q.answer ?? q.a ?? q.correct ?? q.correct_answer ?? '').trim(),
+      explanation: String(q.explanation ?? q.e ?? '').trim(),
     };
   }
 
-  // ---- Single compact batch call ----
-  async function generateCompactBatch(chunkText, cardCount, quizCount, types, onStatus, avoidList = []) {
-    const codes = types.map(t => TYPE_TO_CODE[t]).filter(Boolean).join(',');
+  // ---- Dedicated flashcard batch call ----
+  async function generateCardsBatch(chunkText, count, onStatus, avoidList = []) {
     const avoidLine = avoidList.length > 0
-      ? `\nSkip these topics: ${avoidList.slice(-12).join(' | ')}`
+      ? `\nDo NOT repeat these topics: ${avoidList.slice(-15).join(' | ')}`
       : '';
 
-    const parts = [];
-    if (cardCount > 0) parts.push(`"c":[${cardCount} flashcards {"f":"term/q","b":"short answer"}]`);
-    if (quizCount > 0) parts.push(`"q":[${quizCount} quiz items across types(${codes}): {"t":"mc|tf|fb|id","q":"question","o":["4 opts if mc"],"a":"answer"}]`);
-
-    const prompt = `Notes:\n${chunkText}${avoidLine}\n\nOutput compact json with EXACTLY ${parts.join(' and ')}. Keep text concise, omit explanations.`;
+    const prompt = `Notes:\n${chunkText}${avoidLine}\n\nCreate EXACTLY ${count} flashcards from the notes above.\nReturn valid JSON: {"cards":[{"front":"concise question or term","back":"concise answer"}]}\nRules:\n- "cards" array MUST contain exactly ${count} items.\n- Keep text concise.`;
 
     const result = await callAI(prompt, onStatus);
-    const rawCards = result.c || result.cards || result.flashcards || [];
-    const rawQuestions = result.q || result.questions || result.quizQuestions || result.quiz || [];
-
-    const cards = rawCards.map(normalizeCard).filter(c => c.front && c.back);
-    const questions = rawQuestions.map(q => normalizeQuestion(q, types)).filter(q => q.question && q.answer);
-    return { cards, questions };
+    const rawCards = extractArray(result, ['cards', 'c', 'flashcards', 'items', 'data']);
+    return rawCards.map(normalizeCard).filter(c => c.front && c.back);
   }
 
-  // ---- Combined Generation (token-efficient + chunked batching for unlimited counts) ----
+  // ---- Dedicated quiz batch call ----
+  async function generateQuizBatch(chunkText, count, types, onStatus, avoidList = []) {
+    const avoidLine = avoidList.length > 0
+      ? `\nDo NOT repeat these topics: ${avoidList.slice(-15).join(' | ')}`
+      : '';
+
+    const typeList = types.join(', ');
+    const prompt = `Notes:\n${chunkText}${avoidLine}\n\nCreate EXACTLY ${count} quiz questions from the notes above.\nAllowed types: ${typeList}\nReturn valid JSON: {"questions":[{"type":"${types[0]}","question":"...","options":["A","B","C","D"],"answer":"..."}]}\nRules:\n- "questions" array MUST contain exactly ${count} items.\n- Spread questions across the allowed types (${typeList}).\n- For multiple_choice: provide 4 options and "answer" must match one option.\n- For true_false: "options" is [] and "answer" is "True" or "False".\n- For fill_blank or identification: "options" is [] and "answer" is concise.\n- Omit explanations to save tokens.`;
+
+    const result = await callAI(prompt, onStatus);
+    const rawQuestions = extractArray(result, ['questions', 'q', 'quizQuestions', 'quiz', 'items', 'data']);
+    return rawQuestions.map(q => normalizeQuestion(q, types)).filter(q => q.question && q.answer);
+  }
+
+  // ---- Helper: build fallback study items from notes if API stops short ----
+  function buildNoteFacts(notes) {
+    return compressNotes(notes)
+      .split(/(?<=[.!?])\s+|\n+/)
+      .map(s => s.trim())
+      .filter(s => s.length >= 20);
+  }
+
+  // ---- Combined Generation (token-efficient + chunked batching + exact count guarantee) ----
   async function generateAll(notes, cardCount = 10, quizCount = 10, types = ['multiple_choice', 'true_false', 'fill_blank', 'identification'], onStatus) {
     cardCount = Math.max(0, parseInt(cardCount, 10) || 0);
     quizCount = Math.max(0, parseInt(quizCount, 10) || 0);
@@ -373,110 +411,208 @@ const Generator = (() => {
     }
 
     const chunks = splitIntoChunks(notes, 6000);
-    const BATCH_LIMIT = 20; // max total items per API call to fit comfortably in output budget
+    const CARD_BATCH_LIMIT = 12;
+    const QUIZ_BATCH_LIMIT = 10;
 
     const allCards = [];
     const allQuestions = [];
     let chunkIdx = 0;
-    let safetyRounds = 0;
-    const maxRounds = Math.ceil((cardCount + quizCount) / 8) + 3;
+    let totalCalls = 0;
 
-    while ((allCards.length < cardCount || allQuestions.length < quizCount) && safetyRounds < maxRounds) {
-      safetyRounds++;
-      const remCards = cardCount - allCards.length;
-      const remQuiz = quizCount - allQuestions.length;
+    // 1. Generate exact number of flashcards (only if cardCount > 0)
+    if (cardCount > 0) {
+      const maxCardRounds = Math.ceil(cardCount / 4) + 4;
+      let cardRounds = 0;
+      while (allCards.length < cardCount && cardRounds < maxCardRounds) {
+        cardRounds++;
+        totalCalls++;
+        const rem = cardCount - allCards.length;
+        const batchSize = Math.min(rem, CARD_BATCH_LIMIT);
+        const currentChunk = chunks[chunkIdx % chunks.length];
+        chunkIdx++;
 
-      // Split batch budget between remaining cards & quiz
-      let batchCards = 0;
-      let batchQuiz = 0;
-      if (remCards > 0 && remQuiz > 0) {
-        batchCards = Math.min(remCards, Math.max(1, Math.floor(BATCH_LIMIT * (remCards / (remCards + remQuiz)))));
-        batchQuiz = Math.min(remQuiz, BATCH_LIMIT - batchCards);
-      } else if (remCards > 0) {
-        batchCards = Math.min(remCards, BATCH_LIMIT);
-      } else {
-        batchQuiz = Math.min(remQuiz, BATCH_LIMIT);
-      }
+        onStatus?.(`Generating flashcards (${allCards.length}/${cardCount})...`);
+        const avoidList = allCards.slice(-12).map(c => c.front.slice(0, 40));
 
-      const currentChunk = chunks[chunkIdx % chunks.length];
-      chunkIdx++;
-
-      const totalDone = allCards.length + allQuestions.length;
-      const totalTarget = cardCount + quizCount;
-      if (safetyRounds > 1) {
-        onStatus?.(`Generating batch ${safetyRounds} (${totalDone}/${totalTarget} items)...`);
-      }
-
-      const avoidList = [
-        ...allCards.slice(-6).map(c => c.front.slice(0, 40)),
-        ...allQuestions.slice(-6).map(q => q.question.slice(0, 40)),
-      ];
-
-      try {
-        const { cards, questions } = await generateCompactBatch(currentChunk, batchCards, batchQuiz, types, onStatus, avoidList);
-        if (remCards > 0) allCards.push(...cards.slice(0, remCards));
-        if (remQuiz > 0) allQuestions.push(...questions.slice(0, remQuiz));
-      } catch (err) {
-        // If we already generated some items and hit a transient error, break to fallback padding instead of losing progress
-        if (allCards.length > 0 || allQuestions.length > 0) {
-          console.warn('Batch stopped early, using generated items:', err.message);
+        try {
+          const batch = await generateCardsBatch(currentChunk, batchSize, onStatus, avoidList);
+          if (batch.length > 0) {
+            allCards.push(...batch.slice(0, rem));
+          }
+        } catch (err) {
+          if (allCards.length > 0) {
+            console.warn('Flashcard batch stopped early, padding remaining:', err.message);
+            break;
+          }
+          if (quizCount === 0) throw err;
+          console.warn('Flashcard generation failed:', err.message);
           break;
         }
-        throw err;
-      }
 
-      // Brief pause between batches to respect free-tier TPM limits
-      if (allCards.length < cardCount || allQuestions.length < quizCount) {
-        await new Promise(r => setTimeout(r, 1200));
+        if (allCards.length < cardCount) {
+          await new Promise(r => setTimeout(r, 1000));
+        }
       }
     }
 
-    // Fallback pad if AI fell slightly short
-    while (allCards.length < cardCount && allQuestions.length > 0) {
-      const q = allQuestions[allCards.length % allQuestions.length];
-      allCards.push({
-        id: Storage.uuid(),
-        front: q.question,
-        back: q.answer,
-        mastery: 0,
-        lastReviewed: null,
-        timesCorrect: 0,
-        timesWrong: 0,
-      });
+    // Pause before quiz generation if both were requested
+    if (cardCount > 0 && quizCount > 0) {
+      await new Promise(r => setTimeout(r, 1000));
     }
 
-    while (allQuestions.length < quizCount && allCards.length > 0) {
-      const c = allCards[allQuestions.length % allCards.length];
-      const fallbackType = types[allQuestions.length % types.length] || 'identification';
-      if (fallbackType === 'multiple_choice' && allCards.length >= 4) {
-        const distractors = allCards.filter(x => x.id !== c.id).slice(0, 3).map(x => x.front);
-        const options = [c.front, ...distractors].sort(() => Math.random() - 0.5);
-        allQuestions.push({
+    // 2. Generate exact number of quiz questions (only if quizCount > 0)
+    if (quizCount > 0) {
+      const maxQuizRounds = Math.ceil(quizCount / 4) + 4;
+      let quizRounds = 0;
+      while (allQuestions.length < quizCount && quizRounds < maxQuizRounds) {
+        quizRounds++;
+        totalCalls++;
+        const rem = quizCount - allQuestions.length;
+        const batchSize = Math.min(rem, QUIZ_BATCH_LIMIT);
+        const currentChunk = chunks[chunkIdx % chunks.length];
+        chunkIdx++;
+
+        onStatus?.(`Generating quiz questions (${allQuestions.length}/${quizCount})...`);
+        const avoidList = allQuestions.slice(-12).map(q => q.question.slice(0, 40));
+
+        try {
+          const batch = await generateQuizBatch(currentChunk, batchSize, types, onStatus, avoidList);
+          if (batch.length > 0) {
+            allQuestions.push(...batch.slice(0, rem));
+          }
+        } catch (err) {
+          if (allQuestions.length > 0 || allCards.length > 0) {
+            console.warn('Quiz batch stopped early, padding remaining:', err.message);
+            break;
+          }
+          throw err;
+        }
+
+        if (allQuestions.length < quizCount) {
+          await new Promise(r => setTimeout(r, 1000));
+        }
+      }
+    }
+
+    // 3. Exact-count fallback padding if AI fell short after retries
+    const facts = buildNoteFacts(notes);
+
+    while (allCards.length < cardCount) {
+      if (allQuestions.length > 0 && allCards.length < allQuestions.length) {
+        const q = allQuestions[allCards.length % allQuestions.length];
+        allCards.push({
           id: Storage.uuid(),
-          type: 'multiple_choice',
-          question: `Which concept matches: ${c.back}`,
-          options,
-          answer: c.front,
-          explanation: '',
+          front: q.question,
+          back: q.answer,
+          mastery: 0,
+          lastReviewed: null,
+          timesCorrect: 0,
+          timesWrong: 0,
         });
-      } else if (fallbackType === 'true_false') {
-        allQuestions.push({
+      } else if (facts.length > 0) {
+        const fact = facts[allCards.length % facts.length];
+        const words = fact.split(/\s+/);
+        const mid = Math.max(2, Math.floor(words.length / 2));
+        allCards.push({
           id: Storage.uuid(),
-          type: 'true_false',
-          question: `${c.front}: ${c.back}`,
-          options: [],
-          answer: 'True',
-          explanation: '',
+          front: `Complete/Explain: "${words.slice(0, mid).join(' ')}..."`,
+          back: fact,
+          mastery: 0,
+          lastReviewed: null,
+          timesCorrect: 0,
+          timesWrong: 0,
         });
+      } else if (allCards.length > 0) {
+        const base = allCards[allCards.length % allCards.length];
+        allCards.push({ ...base, id: Storage.uuid() });
       } else {
-        allQuestions.push({
-          id: Storage.uuid(),
-          type: fallbackType === 'fill_blank' ? 'fill_blank' : 'identification',
-          question: fallbackType === 'fill_blank' ? `_____ refers to: ${c.back}` : `Identify: ${c.back}`,
-          options: [],
-          answer: c.front,
-          explanation: '',
-        });
+        break;
+      }
+    }
+
+    while (allQuestions.length < quizCount) {
+      const idx = allQuestions.length;
+      const fallbackType = types[idx % types.length] || 'identification';
+
+      if (allCards.length > 0) {
+        const c = allCards[idx % allCards.length];
+        if (fallbackType === 'multiple_choice' && allCards.length >= 4) {
+          const distractors = allCards.filter(x => x.id !== c.id).slice(0, 3).map(x => x.front);
+          const options = [c.front, ...distractors].sort(() => Math.random() - 0.5);
+          allQuestions.push({
+            id: Storage.uuid(),
+            type: 'multiple_choice',
+            question: `Which concept matches: ${c.back}`,
+            options,
+            answer: c.front,
+            explanation: '',
+          });
+        } else if (fallbackType === 'true_false') {
+          allQuestions.push({
+            id: Storage.uuid(),
+            type: 'true_false',
+            question: `${c.front}: ${c.back}`,
+            options: [],
+            answer: 'True',
+            explanation: '',
+          });
+        } else {
+          allQuestions.push({
+            id: Storage.uuid(),
+            type: fallbackType === 'fill_blank' ? 'fill_blank' : 'identification',
+            question: fallbackType === 'fill_blank' ? `_____ refers to: ${c.back}` : `Identify: ${c.back}`,
+            options: [],
+            answer: c.front,
+            explanation: '',
+          });
+        }
+      } else if (allQuestions.length > 0) {
+        // Derive a variation from an existing question or note fact so quizCount is still exact even when cardCount === 0
+        const existing = allQuestions[idx % allQuestions.length];
+        if (facts.length > 0) {
+          const fact = facts[idx % facts.length];
+          const words = fact.split(/\s+/).filter(w => w.length > 3);
+          const targetWord = words[Math.floor(words.length / 2)] || words[0] || existing.answer;
+          const cleanAnswer = targetWord.replace(/[.,;:!?()"']/g, '');
+          if (fallbackType === 'true_false') {
+            allQuestions.push({
+              id: Storage.uuid(),
+              type: 'true_false',
+              question: fact,
+              options: [],
+              answer: 'True',
+              explanation: '',
+            });
+          } else if (fallbackType === 'multiple_choice' && allQuestions.length >= 3) {
+            const distractors = allQuestions
+              .map(q => q.answer)
+              .filter(a => a && a !== cleanAnswer)
+              .slice(0, 3);
+            while (distractors.length < 3) distractors.push(`Option ${distractors.length + 1}`);
+            const options = [cleanAnswer, ...distractors].sort(() => Math.random() - 0.5);
+            allQuestions.push({
+              id: Storage.uuid(),
+              type: 'multiple_choice',
+              question: fact.replace(targetWord, '_____'),
+              options,
+              answer: cleanAnswer,
+              explanation: '',
+            });
+          } else {
+            allQuestions.push({
+              id: Storage.uuid(),
+              type: fallbackType === 'fill_blank' ? 'fill_blank' : 'identification',
+              question: fact.replace(targetWord, '_____'),
+              options: [],
+              answer: cleanAnswer,
+              explanation: '',
+            });
+          }
+        } else {
+          allQuestions.push({ ...existing, id: Storage.uuid() });
+        }
+      } else {
+        break;
       }
     }
 
