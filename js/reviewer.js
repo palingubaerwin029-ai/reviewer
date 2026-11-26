@@ -224,8 +224,15 @@ const Reviewer = (() => {
             <input type="number" id="gen-quiz-count" value="10" min="0" placeholder="e.g. 10, 30, 50...">
           </div>
           <div class="form-group">
+            <label>Mode <span style="font-weight:400;color:var(--text-muted);font-size:0.8rem;">(Current: ${deck.cards.length} cards, ${deck.quizQuestions.length} questions)</span></label>
+            <div class="type-checkboxes" id="gen-mode-group">
+              <label class="type-checkbox checked"><input type="radio" name="gen-mode" value="replace" checked> 🔄 Replace existing</label>
+              <label class="type-checkbox"><input type="radio" name="gen-mode" value="add"> ➕ Add to existing</label>
+            </div>
+          </div>
+          <div class="form-group">
             <label>Question Types</label>
-            <div class="type-checkboxes">
+            <div class="type-checkboxes" id="gen-types-group">
               <label class="type-checkbox checked"><input type="checkbox" value="multiple_choice" checked> Multiple Choice</label>
               <label class="type-checkbox checked"><input type="checkbox" value="true_false" checked> True / False</label>
               <label class="type-checkbox checked"><input type="checkbox" value="fill_blank" checked> Fill in the Blank</label>
@@ -287,12 +294,21 @@ const Reviewer = (() => {
       </div>
     `;
 
-    // Setup type checkboxes toggle
-    container.querySelectorAll('.type-checkbox').forEach(el => {
+    // Setup type checkboxes & mode radio toggle
+    container.querySelectorAll('#gen-types-group .type-checkbox').forEach(el => {
       const cb = el.querySelector('input');
       el.addEventListener('click', (e) => {
         if (e.target !== cb) cb.checked = !cb.checked;
         el.classList.toggle('checked', cb.checked);
+      });
+    });
+    container.querySelectorAll('#gen-mode-group .type-checkbox').forEach(el => {
+      const radio = el.querySelector('input');
+      el.addEventListener('click', () => {
+        radio.checked = true;
+        container.querySelectorAll('#gen-mode-group .type-checkbox').forEach(other => {
+          other.classList.toggle('checked', other.querySelector('input').checked);
+        });
       });
     });
   }
@@ -627,7 +643,8 @@ ${deck.notes ? escapeHtml(deck.notes) : '<span class="text-muted">No notes added
     const rawQuizVal = quizInput === '' ? 0 : parseInt(quizInput, 10);
     const cardCount = Number.isNaN(rawCardVal) ? 0 : Math.max(0, rawCardVal);
     const quizCount = Number.isNaN(rawQuizVal) ? 0 : Math.max(0, rawQuizVal);
-    const types = [...document.querySelectorAll('#modal-generate .type-checkbox input:checked')].map(cb => cb.value);
+    const types = [...document.querySelectorAll('#gen-types-group .type-checkbox input:checked')].map(cb => cb.value);
+    const genMode = document.querySelector('input[name="gen-mode"]:checked')?.value || 'replace';
 
     if (cardCount === 0 && quizCount === 0) {
       App.toast('Enter at least 1 flashcard or 1 quiz question.', 'error');
@@ -654,10 +671,15 @@ ${deck.notes ? escapeHtml(deck.notes) : '<span class="text-muted">No notes added
         (msg) => { if (statusText) statusText.textContent = msg; }
       );
 
-      // Add generated items to deck
+      // Save generated items to deck (replace or add)
       const updatedDeck = Storage.getDeck(deckId);
-      cards.forEach(c => updatedDeck.cards.push(c));
-      questions.forEach(q => updatedDeck.quizQuestions.push(q));
+      if (genMode === 'replace') {
+        updatedDeck.cards = cards;
+        updatedDeck.quizQuestions = questions;
+      } else {
+        cards.forEach(c => updatedDeck.cards.push(c));
+        questions.forEach(q => updatedDeck.quizQuestions.push(q));
+      }
       Storage.saveDeck(updatedDeck);
 
       App.hideModal('modal-generate');
