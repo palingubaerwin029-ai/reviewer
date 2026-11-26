@@ -174,10 +174,10 @@ const Reviewer = (() => {
         </div>
       </div>
 
-      ${deck.cards.length > 0 ? `
+      ${(deck.cards.length > 0 || deck.quizQuestions.length > 0) ? `
       <div class="btn-group mb-3">
-        <button class="btn btn-primary" onclick="App.navigate('flashcards','${deckId}')">🃏 Study Flashcards</button>
-        <button class="btn btn-secondary" onclick="App.navigate('quiz','${deckId}')">📋 Take Quiz</button>
+        ${deck.cards.length > 0 ? `<button class="btn btn-primary" onclick="App.navigate('flashcards','${deckId}')">🃏 Study Flashcards</button>` : ''}
+        ${deck.quizQuestions.length > 0 ? `<button class="btn btn-secondary" onclick="App.navigate('quiz','${deckId}')">📋 Take Quiz</button>` : ''}
       </div>
       ` : ''}
 
@@ -621,10 +621,12 @@ ${deck.notes ? escapeHtml(deck.notes) : '<span class="text-muted">No notes added
       return;
     }
 
-    const rawCardVal = parseInt(document.getElementById('gen-card-count')?.value, 10);
-    const rawQuizVal = parseInt(document.getElementById('gen-quiz-count')?.value, 10);
-    const cardCount = Number.isNaN(rawCardVal) ? 10 : Math.max(0, rawCardVal);
-    const quizCount = Number.isNaN(rawQuizVal) ? 10 : Math.max(0, rawQuizVal);
+    const cardInput = (document.getElementById('gen-card-count')?.value ?? '').trim();
+    const quizInput = (document.getElementById('gen-quiz-count')?.value ?? '').trim();
+    const rawCardVal = cardInput === '' ? 0 : parseInt(cardInput, 10);
+    const rawQuizVal = quizInput === '' ? 0 : parseInt(quizInput, 10);
+    const cardCount = Number.isNaN(rawCardVal) ? 0 : Math.max(0, rawCardVal);
+    const quizCount = Number.isNaN(rawQuizVal) ? 0 : Math.max(0, rawQuizVal);
     const types = [...document.querySelectorAll('#modal-generate .type-checkbox input:checked')].map(cb => cb.value);
 
     if (cardCount === 0 && quizCount === 0) {
