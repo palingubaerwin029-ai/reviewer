@@ -45,7 +45,7 @@ const FileParser = (() => {
     };
   }
 
-  // ---- Plain text ----
+  // ---- Plain text & structured text ----
   async function parseTXT(file) {
     const text = await file.text();
     return { text, fileName: file.name };
@@ -58,12 +58,23 @@ const FileParser = (() => {
       case 'pdf': return parsePDF(file);
       case 'docx': return parseDOCX(file);
       case 'doc':
-        throw new Error('Legacy .doc format is not supported. Please convert to .docx first.');
+        throw new Error('Legacy .doc format is not supported. Please save as .docx or copy the text.');
       case 'txt':
       case 'md':
+      case 'csv':
+      case 'tsv':
+      case 'json':
+      case 'rtf':
+      case 'html':
+      case 'htm':
         return parseTXT(file);
       default:
-        throw new Error(`Unsupported file type: .${ext}. Supported formats: PDF, DOCX, TXT, MD`);
+        // Try reading as text before giving up
+        try {
+          return await parseTXT(file);
+        } catch {
+          throw new Error(`Unsupported file type: .${ext}. Supported: PDF, DOCX, TXT, MD, CSV, JSON`);
+        }
     }
   }
 
@@ -83,11 +94,11 @@ const FileParser = (() => {
 
   // ---- Get accepted file types ----
   function getAcceptedTypes() {
-    return '.pdf,.docx,.txt,.md';
+    return '.pdf,.docx,.txt,.md,.csv,.tsv,.json,.rtf,.html,.htm';
   }
 
   function getAcceptedDescription() {
-    return 'PDF, DOCX, TXT, or MD files';
+    return 'PDF, DOCX, TXT, MD, CSV, or JSON files';
   }
 
   return {

@@ -59,6 +59,9 @@ const Dashboard = (() => {
             <button class="btn btn-primary w-full" onclick="App.navigate('reviewer')">
               ➕ Create New Reviewer
             </button>
+            <button class="btn btn-secondary w-full" onclick="App.navigate('reviewer'); setTimeout(() => Reviewer.showCreateModal(true), 150);">
+              📄 Upload File from Storage
+            </button>
             ${decks.length > 0 ? `
               <button class="btn btn-secondary w-full" onclick="App.navigate('flashcards')">
                 🃏 Study Flashcards

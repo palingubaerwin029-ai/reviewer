@@ -21,15 +21,21 @@ const Reviewer = (() => {
           <h1>📝 Reviewer</h1>
           <p>Create and manage your study decks.</p>
         </div>
-        <button class="btn btn-primary" onclick="Reviewer.showCreateModal()">➕ New Deck</button>
+        <div class="btn-group">
+          <button class="btn btn-secondary" onclick="Reviewer.showCreateModal(true)">📄 Upload File</button>
+          <button class="btn btn-primary" onclick="Reviewer.showCreateModal(false)">➕ New Deck</button>
+        </div>
       </div>
 
       ${decks.length === 0 ? `
         <div class="empty-state">
           <div style="font-size:4rem;margin-bottom:16px;">📂</div>
           <h3>No decks yet</h3>
-          <p>Create your first deck by pasting notes or uploading a file.</p>
-          <button class="btn btn-primary btn-lg" onclick="Reviewer.showCreateModal()">➕ Create Deck</button>
+          <p>Create your first deck by pasting notes or uploading a file from your device storage.</p>
+          <div class="btn-group" style="justify-content:center;margin-top:16px;">
+            <button class="btn btn-primary btn-lg" onclick="Reviewer.showCreateModal(false)">➕ Create Deck</button>
+            <button class="btn btn-secondary btn-lg" onclick="Reviewer.showCreateModal(true)">📄 Upload from Storage</button>
+          </div>
         </div>
       ` : `
         <div class="card-grid">
@@ -95,8 +101,11 @@ const Reviewer = (() => {
             <div class="drop-zone" id="create-drop-zone">
               <input type="file" id="file-upload-input" accept="${FileParser.getAcceptedTypes()}" multiple>
               <div style="font-size:2.5rem;margin-bottom:8px;">📁</div>
-              <h3>Drop files here or click to browse</h3>
+              <h3>Drop files here or click to browse device storage</h3>
               <p>Supports ${FileParser.getAcceptedDescription()}</p>
+              <button type="button" class="btn btn-sm btn-secondary mt-2">
+                📂 Browse Device Storage
+              </button>
             </div>
             <div id="file-preview" class="hidden mt-2">
               <div class="form-group">
@@ -144,6 +153,7 @@ const Reviewer = (() => {
           </div>
         </div>
         <div class="btn-group">
+          <button class="btn btn-secondary" onclick="Reviewer.showUploadModal('${deckId}')">📄 Upload File</button>
           <button class="btn btn-primary" onclick="Reviewer.generateContent('${deckId}')">🤖 Generate Cards</button>
           <button class="btn btn-danger btn-sm" onclick="Reviewer.confirmDeleteDeck('${deckId}')">🗑️ Delete</button>
         </div>
@@ -232,6 +242,49 @@ const Reviewer = (() => {
           </div>
         </div>
       </div>
+
+      <!-- Upload to Existing Deck Modal -->
+      <div class="modal-overlay" id="modal-upload-to-deck">
+        <div class="modal" style="max-width:640px;">
+          <div class="modal-header">
+            <div>
+              <h2>📄 Upload File from Storage</h2>
+              <p style="font-size:0.8rem;color:var(--text-muted);margin-top:2px;">
+                Extract content from device storage to update <strong>${escapeHtml(deck.name)}</strong>
+              </p>
+            </div>
+            <button class="modal-close" onclick="App.hideModal('modal-upload-to-deck')">&times;</button>
+          </div>
+
+          <div class="drop-zone" id="deck-drop-zone">
+            <input type="file" id="deck-file-upload-input" accept="${FileParser.getAcceptedTypes()}" multiple>
+            <div style="font-size:2.5rem;margin-bottom:8px;">📁</div>
+            <h3>Drop files here or click to browse device storage</h3>
+            <p>Supports ${FileParser.getAcceptedDescription()}</p>
+            <button type="button" class="btn btn-sm btn-secondary mt-2">
+              📂 Browse Device Storage
+            </button>
+          </div>
+
+          <div id="deck-file-preview" class="hidden mt-2">
+            <div class="form-group">
+              <label>Extracted Text Preview (editable)</label>
+              <textarea id="deck-extracted-text" rows="8" placeholder="Extracted text will appear here..."></textarea>
+            </div>
+            <div id="deck-file-info" class="text-muted mb-2" style="font-size:0.85rem;"></div>
+
+            <div class="btn-group mt-3">
+              <button class="btn btn-primary" onclick="Reviewer.applyUploadedFile('${deckId}', 'replace')">
+                🔄 Replace Existing Notes
+              </button>
+              <button class="btn btn-secondary" onclick="Reviewer.applyUploadedFile('${deckId}', 'append')">
+                ➕ Append to Notes
+              </button>
+              <button class="btn btn-secondary" onclick="App.hideModal('modal-upload-to-deck')">Cancel</button>
+            </div>
+          </div>
+        </div>
+      </div>
     `;
 
     // Setup type checkboxes toggle
@@ -249,7 +302,10 @@ const Reviewer = (() => {
       <div class="card" style="max-width:800px;">
         <div class="card-header">
           <h3 class="card-title">📝 Notes</h3>
-          <button class="btn btn-sm btn-secondary" onclick="Reviewer.editNotes('${deck.id}')">Edit</button>
+          <div class="btn-group">
+            <button class="btn btn-sm btn-secondary" onclick="Reviewer.showUploadModal('${deck.id}')">📄 Upload / Append File</button>
+            <button class="btn btn-sm btn-secondary" onclick="Reviewer.editNotes('${deck.id}')">✏️ Edit</button>
+          </div>
         </div>
         <div style="white-space:pre-wrap;color:var(--text-secondary);font-size:0.925rem;max-height:400px;overflow-y:auto;line-height:1.7;">
 ${deck.notes ? escapeHtml(deck.notes) : '<span class="text-muted">No notes added yet.</span>'}
@@ -331,9 +387,100 @@ ${deck.notes ? escapeHtml(deck.notes) : '<span class="text-muted">No notes added
     document.getElementById('tab-upload').classList.toggle('hidden', tab !== 'upload');
   }
 
-  function showCreateModal() {
+  function showCreateModal(startWithUpload = false) {
     App.showModal('modal-create-deck');
+    if (startWithUpload) {
+      switchTab('upload');
+    } else {
+      switchTab('paste');
+    }
     setTimeout(() => document.getElementById('new-deck-name')?.focus(), 100);
+  }
+
+  // ---- Upload Modal for Existing Deck ----
+  function showUploadModal(deckId) {
+    App.showModal('modal-upload-to-deck');
+    setupDeckDropZone(deckId);
+  }
+
+  function setupDeckDropZone(deckId) {
+    const zone = document.getElementById('deck-drop-zone');
+    const input = document.getElementById('deck-file-upload-input');
+    if (!zone || !input) return;
+
+    zone.addEventListener('dragover', (e) => { e.preventDefault(); zone.classList.add('dragover'); });
+    zone.addEventListener('dragleave', () => zone.classList.remove('dragover'));
+    zone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      zone.classList.remove('dragover');
+      handleDeckFiles(e.dataTransfer.files, deckId);
+    });
+    input.addEventListener('change', (e) => handleDeckFiles(e.target.files, deckId));
+  }
+
+  async function handleDeckFiles(fileList, deckId) {
+    if (!fileList || fileList.length === 0) return;
+    const preview = document.getElementById('deck-file-preview');
+    const textArea = document.getElementById('deck-extracted-text');
+    const fileInfo = document.getElementById('deck-file-info');
+
+    preview.classList.remove('hidden');
+    textArea.value = 'Extracting text...';
+    fileInfo.textContent = `Processing ${fileList.length} file(s)...`;
+
+    try {
+      const results = await FileParser.parseFiles(fileList);
+      const texts = [];
+      const names = [];
+      let errors = [];
+
+      for (const r of results) {
+        if (r.success) {
+          texts.push(r.text);
+          names.push(r.fileName);
+        } else {
+          errors.push(`${r.fileName}: ${r.error}`);
+        }
+      }
+
+      textArea.value = texts.join('\n\n---\n\n');
+      fileInfo.textContent = `📄 Extracted from: ${names.join(', ')}`;
+      fileInfo.dataset.fileName = names.join(', ');
+      if (errors.length) {
+        fileInfo.textContent += ` | ⚠️ Errors: ${errors.join('; ')}`;
+      }
+    } catch (err) {
+      textArea.value = '';
+      fileInfo.textContent = `❌ Error: ${err.message}`;
+      App.toast(err.message, 'error');
+    }
+  }
+
+  function applyUploadedFile(deckId, mode) {
+    const deck = Storage.getDeck(deckId);
+    if (!deck) return;
+    const extracted = document.getElementById('deck-extracted-text')?.value.trim();
+    if (!extracted) {
+      App.toast('No extracted text to save.', 'error');
+      return;
+    }
+    const fileName = document.getElementById('deck-file-info')?.dataset?.fileName || 'uploaded file';
+
+    let updatedNotes = extracted;
+    if (mode === 'append' && deck.notes) {
+      updatedNotes = deck.notes + '\n\n---\n\n' + extracted;
+    }
+
+    Storage.saveDeck({
+      id: deckId,
+      notes: updatedNotes,
+      source: 'upload',
+      sourceFile: fileName,
+    });
+
+    App.hideModal('modal-upload-to-deck');
+    App.toast(mode === 'append' ? 'File content appended to notes!' : 'Notes replaced with file content!', 'success');
+    render(deckId);
   }
 
   // ---- File Upload / Drop Zone ----
@@ -381,6 +528,7 @@ ${deck.notes ? escapeHtml(deck.notes) : '<span class="text-muted">No notes added
       let info = `📄 Extracted from: ${names.join(', ')}`;
       if (errors.length) info += ` | ⚠️ Errors: ${errors.join('; ')}`;
       fileInfo.textContent = info;
+      fileInfo.dataset.fileName = names.join(', ');
 
       // Auto-fill deck name if empty
       const nameInput = document.getElementById('new-deck-name');
@@ -407,7 +555,7 @@ ${deck.notes ? escapeHtml(deck.notes) : '<span class="text-muted">No notes added
     if (!notes) { App.toast('Please add notes or upload a file.', 'error'); return; }
 
     const source = pasteTab ? 'typed' : 'upload';
-    const sourceFile = !pasteTab ? (document.getElementById('file-info')?.textContent || '') : '';
+    const sourceFile = !pasteTab ? (document.getElementById('file-info')?.dataset?.fileName || 'Uploaded file') : '';
 
     Storage.createDeck({ name, tags, notes, source, sourceFile });
     App.hideModal('modal-create-deck');
@@ -537,9 +685,9 @@ ${deck.notes ? escapeHtml(deck.notes) : '<span class="text-muted">No notes added
   }
 
   return {
-    render, showCreateModal, switchTab, createDeck,
+    render, showCreateModal, showUploadModal, switchTab, createDeck,
     showDetailTab, editNotes, saveNotes,
     generateContent, doGenerate,
-    deleteCard, deleteQuestion, confirmDeleteDeck,
+    deleteCard, deleteQuestion, confirmDeleteDeck, applyUploadedFile,
   };
 })();
