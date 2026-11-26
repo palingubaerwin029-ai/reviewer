@@ -421,7 +421,7 @@ Return ONLY the raw json object, no markdown codeblocks, no extra explanation.`;
   }
 
   // ---- Generate Flashcards (standalone) ----
-  async function generateFlashcards(notes, count = 10, onStatus, existingFronts = []) {
+  async function generateFlashcards(notes, count = 10, onStatus, existingFronts = [], allowTopUp = true) {
     const processedNotes = trimNotes(notes);
     const avoidClause = existingFronts.length > 0
       ? `\nAvoid repeating these already-generated prompts:\n- ${existingFronts.slice(0, 15).join('\n- ')}`
@@ -450,7 +450,7 @@ Rules:
 
     const result = await callAI(prompt, onStatus);
     const raw = Array.isArray(result) ? result : result.cards || result.flashcards || [];
-    return raw.map(c => ({
+    const cards = raw.map(c => ({
       id: Storage.uuid(),
       front: c.front || c.question || c.term || '',
       back: c.back || c.answer || c.definition || '',
@@ -458,11 +458,24 @@ Rules:
       lastReviewed: null,
       timesCorrect: 0,
       timesWrong: 0,
-    })).filter(c => c.front && c.back).slice(0, count);
+    })).filter(c => c.front && c.back);
+
+    if (allowTopUp && cards.length < count) {
+      const missing = count - cards.length;
+      onStatus?.(`Generating remaining ${missing} flashcard(s)...`);
+      try {
+        const extra = await generateFlashcards(processedNotes, missing, onStatus, [...existingFronts, ...cards.map(c => c.front)], false);
+        cards.push(...extra);
+      } catch (e) {
+        console.warn('Standalone flashcards top-up failed:', e);
+      }
+    }
+
+    return cards.slice(0, count);
   }
 
   // ---- Generate Quiz Questions (standalone) ----
-  async function generateQuizQuestions(notes, types = ['multiple_choice', 'true_false', 'fill_blank', 'identification'], count = 10, onStatus, existingQuestions = []) {
+  async function generateQuizQuestions(notes, types = ['multiple_choice', 'true_false', 'fill_blank', 'identification'], count = 10, onStatus, existingQuestions = [], allowTopUp = true) {
     const processedNotes = trimNotes(notes);
     const typeDescriptions = {
       multiple_choice: 'Multiple Choice: 4 options with 1 correct answer',
@@ -490,14 +503,27 @@ Return ONLY valid json.`;
 
     const result = await callAI(prompt, onStatus);
     const raw = Array.isArray(result) ? result : result.questions || result.quiz || [];
-    return raw.map(q => ({
+    const questions = raw.map(q => ({
       id: Storage.uuid(),
       type: types.includes(q.type) ? q.type : (types[0] || 'multiple_choice'),
       question: q.question || '',
       options: q.options || [],
       answer: q.answer || '',
       explanation: q.explanation || '',
-    })).filter(q => q.question && q.answer).slice(0, count);
+    })).filter(q => q.question && q.answer);
+
+    if (allowTopUp && questions.length < count) {
+      const missing = count - questions.length;
+      onStatus?.(`Generating remaining ${missing} quiz question(s)...`);
+      try {
+        const extra = await generateQuizQuestions(processedNotes, types, missing, onStatus, [...existingQuestions, ...questions.map(q => q.question)], false);
+        questions.push(...extra);
+      } catch (e) {
+        console.warn('Standalone quiz top-up failed:', e);
+      }
+    }
+
+    return questions.slice(0, count);
   }
 
   return {
