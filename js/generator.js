@@ -249,8 +249,32 @@ const Generator = (() => {
     }
   }
 
-  // ---- Combined Generation (1 single call for efficiency and reliability) ----
+  // ---- Helper: trim notes safely ----
+  function trimNotes(notes, maxChars = 12000) {
+    let processed = (notes || '').trim();
+    if (processed.length > maxChars) {
+      processed = processed.slice(0, maxChars) + '\n\n[... Note: Subsequent content truncated to fit AI processing limits ...]';
+    }
+    return processed;
+  }
+
+  // ---- Combined Generation (enforces exact requested counts) ----
   async function generateAll(notes, cardCount = 10, quizCount = 10, types = ['multiple_choice', 'true_false', 'fill_blank', 'identification'], onStatus) {
+    cardCount = Math.max(0, parseInt(cardCount, 10) || 0);
+    quizCount = Math.max(0, parseInt(quizCount, 10) || 0);
+
+    if (cardCount === 0 && quizCount === 0) {
+      return { cards: [], questions: [] };
+    }
+    if (cardCount === 0) {
+      const questions = await generateQuizQuestions(notes, types, quizCount, onStatus);
+      return { cards: [], questions };
+    }
+    if (quizCount === 0) {
+      const cards = await generateFlashcards(notes, cardCount, onStatus);
+      return { cards, questions: [] };
+    }
+
     const typeDescriptions = {
       multiple_choice: 'Multiple Choice: 4 options with 1 correct answer',
       true_false: 'True/False: A statement that is either true or false',
@@ -259,12 +283,7 @@ const Generator = (() => {
     };
 
     const requestedTypes = types.map(t => typeDescriptions[t]).filter(Boolean).join('\n- ');
-
-    // Trim notes if they exceed 12,000 characters to fit comfortably inside free-tier LLM limits
-    let processedNotes = (notes || '').trim();
-    if (processedNotes.length > 12000) {
-      processedNotes = processedNotes.slice(0, 12000) + '\n\n[... Note: Subsequent content truncated to fit AI processing limits ...]';
-    }
+    const processedNotes = trimNotes(notes);
 
     const prompt = `You are an expert study material generator. Based on the notes below, create EXACTLY ${cardCount} flashcards and EXACTLY ${quizCount} quiz questions.
 
@@ -272,9 +291,9 @@ NOTES:
 ${processedNotes}
 
 STRICT COUNT RULES:
-1. The "cards" array MUST contain EXACTLY ${cardCount} items.
-2. The "questions" array MUST contain EXACTLY ${quizCount} items.
-3. Distribute the ${quizCount} questions across these types:
+1. The "cards" array MUST contain EXACTLY ${cardCount} unique items.
+2. The "questions" array MUST contain EXACTLY ${quizCount} unique items.
+3. Only use these question types and distribute across them:
 - ${requestedTypes}
 
 Return a single json object with EXACTLY this structure:
@@ -292,29 +311,11 @@ Return a single json object with EXACTLY this structure:
       "options": ["Option A", "Option B", "Option C", "Option D"],
       "answer": "Option A",
       "explanation": "Why this is correct"
-    },
-    {
-      "type": "true_false",
-      "question": "Statement text",
-      "answer": "True",
-      "explanation": "Why this is true"
-    },
-    {
-      "type": "fill_blank",
-      "question": "The _____ is the key concept.",
-      "answer": "term",
-      "explanation": "Why this is the answer"
-    },
-    {
-      "type": "identification",
-      "question": "The definition or clue",
-      "answer": "The identified term",
-      "explanation": "Explanation"
     }
   ]
 }
 
-Double check that you provided EXACTLY ${cardCount} cards and EXACTLY ${quizCount} questions before returning.
+Double check that "cards" has length ${cardCount} and "questions" has length ${quizCount} before returning.
 Return ONLY the raw json object, no markdown codeblocks, no extra explanation.`;
 
     const result = await callAI(prompt, onStatus);
@@ -334,14 +335,38 @@ Return ONLY the raw json object, no markdown codeblocks, no extra explanation.`;
 
     let questions = rawQuestions.map(q => ({
       id: Storage.uuid(),
-      type: q.type || 'multiple_choice',
+      type: types.includes(q.type) ? q.type : (types[0] || 'multiple_choice'),
       question: q.question || '',
       options: q.options || [],
       answer: q.answer || '',
       explanation: q.explanation || '',
     })).filter(q => q.question && q.answer);
 
-    // Guarantee exact flashcard count
+    // Top-up missing flashcards via AI if AI returned fewer than requested
+    if (cards.length < cardCount) {
+      const missingCards = cardCount - cards.length;
+      onStatus?.(`Generating remaining ${missingCards} flashcard(s)...`);
+      try {
+        const extraCards = await generateFlashcards(processedNotes, missingCards, onStatus, cards.map(c => c.front));
+        cards.push(...extraCards);
+      } catch (e) {
+        console.warn('Top-up flashcards failed:', e);
+      }
+    }
+
+    // Top-up missing quiz questions via AI if AI returned fewer than requested
+    if (questions.length < quizCount) {
+      const missingQuiz = quizCount - questions.length;
+      onStatus?.(`Generating remaining ${missingQuiz} quiz question(s)...`);
+      try {
+        const extraQuestions = await generateQuizQuestions(processedNotes, types, missingQuiz, onStatus, questions.map(q => q.question));
+        questions.push(...extraQuestions);
+      } catch (e) {
+        console.warn('Top-up quiz questions failed:', e);
+      }
+    }
+
+    // Fallback pad if AI still fell short
     while (cards.length < cardCount && questions.length > 0) {
       const q = questions[cards.length % questions.length];
       cards.push({
@@ -356,17 +381,39 @@ Return ONLY the raw json object, no markdown codeblocks, no extra explanation.`;
     }
     cards = cards.slice(0, cardCount);
 
-    // Guarantee exact quiz question count
     while (questions.length < quizCount && cards.length > 0) {
       const c = cards[questions.length % cards.length];
-      questions.push({
-        id: Storage.uuid(),
-        type: 'identification',
-        question: `Identify the concept or term: ${c.back}`,
-        options: [],
-        answer: c.front,
-        explanation: `Flashcard reference: ${c.front} — ${c.back}`,
-      });
+      const fallbackType = types[questions.length % types.length] || 'identification';
+      if (fallbackType === 'multiple_choice' && cards.length >= 4) {
+        const distractors = cards.filter(x => x.id !== c.id).slice(0, 3).map(x => x.front);
+        const options = [c.front, ...distractors].sort(() => Math.random() - 0.5);
+        questions.push({
+          id: Storage.uuid(),
+          type: 'multiple_choice',
+          question: `Which concept matches: ${c.back}`,
+          options,
+          answer: c.front,
+          explanation: `${c.front}: ${c.back}`,
+        });
+      } else if (fallbackType === 'true_false') {
+        questions.push({
+          id: Storage.uuid(),
+          type: 'true_false',
+          question: `${c.front}: ${c.back}`,
+          options: [],
+          answer: 'True',
+          explanation: `From notes: ${c.front} — ${c.back}`,
+        });
+      } else {
+        questions.push({
+          id: Storage.uuid(),
+          type: fallbackType === 'fill_blank' ? 'fill_blank' : 'identification',
+          question: fallbackType === 'fill_blank' ? `_____ refers to: ${c.back}` : `Identify the concept or term: ${c.back}`,
+          options: [],
+          answer: c.front,
+          explanation: `Flashcard reference: ${c.front} — ${c.back}`,
+        });
+      }
     }
     questions = questions.slice(0, quizCount);
 
@@ -374,28 +421,36 @@ Return ONLY the raw json object, no markdown codeblocks, no extra explanation.`;
   }
 
   // ---- Generate Flashcards (standalone) ----
-  async function generateFlashcards(notes, count = 10, onStatus) {
-    const prompt = `You are a study material generator. Based on the following notes, create exactly ${count} flashcards for studying.
+  async function generateFlashcards(notes, count = 10, onStatus, existingFronts = []) {
+    const processedNotes = trimNotes(notes);
+    const avoidClause = existingFronts.length > 0
+      ? `\nAvoid repeating these already-generated prompts:\n- ${existingFronts.slice(0, 15).join('\n- ')}`
+      : '';
+
+    const prompt = `You are a study material generator. Based on the following notes, create EXACTLY ${count} flashcards for studying.
 
 NOTES:
-${notes}
+${processedNotes}
+${avoidClause}
 
-Return a JSON array or object with a "cards" array containing:
-[
-  {
-    "front": "Question or term (the prompt side)",
-    "back": "Answer or definition (the answer side)"
-  }
-]
+Return a json object with a "cards" array containing EXACTLY ${count} items:
+{
+  "cards": [
+    {
+      "front": "Question or term (the prompt side)",
+      "back": "Answer or definition (the answer side)"
+    }
+  ]
+}
 
 Rules:
-- Create exactly ${count} flashcards
+- Create EXACTLY ${count} flashcards
 - Cover the most important concepts, terms, and facts
-- Return ONLY the JSON, nothing else.`;
+- Return ONLY valid json, nothing else.`;
 
     const result = await callAI(prompt, onStatus);
-    const cards = Array.isArray(result) ? result : result.cards || result.flashcards || [];
-    return cards.map(c => ({
+    const raw = Array.isArray(result) ? result : result.cards || result.flashcards || [];
+    return raw.map(c => ({
       id: Storage.uuid(),
       front: c.front || c.question || c.term || '',
       back: c.back || c.answer || c.definition || '',
@@ -403,11 +458,12 @@ Rules:
       lastReviewed: null,
       timesCorrect: 0,
       timesWrong: 0,
-    }));
+    })).filter(c => c.front && c.back).slice(0, count);
   }
 
   // ---- Generate Quiz Questions (standalone) ----
-  async function generateQuizQuestions(notes, types = ['multiple_choice', 'true_false', 'fill_blank', 'identification'], count = 10, onStatus) {
+  async function generateQuizQuestions(notes, types = ['multiple_choice', 'true_false', 'fill_blank', 'identification'], count = 10, onStatus, existingQuestions = []) {
+    const processedNotes = trimNotes(notes);
     const typeDescriptions = {
       multiple_choice: 'Multiple Choice: 4 options with 1 correct answer',
       true_false: 'True/False: A statement that is either true or false',
@@ -416,28 +472,32 @@ Rules:
     };
 
     const requestedTypes = types.map(t => typeDescriptions[t]).filter(Boolean).join('\n- ');
+    const avoidClause = existingQuestions.length > 0
+      ? `\nAvoid repeating these already-generated questions:\n- ${existingQuestions.slice(0, 15).join('\n- ')}`
+      : '';
 
-    const prompt = `You are a quiz question generator. Based on the following notes, create exactly ${count} quiz questions.
+    const prompt = `You are a quiz question generator. Based on the following notes, create EXACTLY ${count} quiz questions.
 
 NOTES:
-${notes}
+${processedNotes}
+${avoidClause}
 
-Distribute questions across these types:
+Distribute EXACTLY ${count} questions across ONLY these types:
 - ${requestedTypes}
 
-Return a JSON object with a "questions" array containing objects with type, question, options (for multiple_choice), answer, and explanation.
-Return ONLY valid JSON.`;
+Return a json object with a "questions" array containing EXACTLY ${count} objects with type, question, options (4 items for multiple_choice), answer, and explanation.
+Return ONLY valid json.`;
 
     const result = await callAI(prompt, onStatus);
-    const questions = Array.isArray(result) ? result : result.questions || result.quiz || [];
-    return questions.map(q => ({
+    const raw = Array.isArray(result) ? result : result.questions || result.quiz || [];
+    return raw.map(q => ({
       id: Storage.uuid(),
-      type: q.type || 'multiple_choice',
+      type: types.includes(q.type) ? q.type : (types[0] || 'multiple_choice'),
       question: q.question || '',
       options: q.options || [],
       answer: q.answer || '',
       explanation: q.explanation || '',
-    }));
+    })).filter(q => q.question && q.answer).slice(0, count);
   }
 
   return {

@@ -217,11 +217,11 @@ const Reviewer = (() => {
 
           <div class="form-group">
             <label>Number of Flashcards</label>
-            <input type="number" id="gen-card-count" value="10" min="1" max="30">
+            <input type="number" id="gen-card-count" value="10" min="0" max="100">
           </div>
           <div class="form-group">
             <label>Number of Quiz Questions</label>
-            <input type="number" id="gen-quiz-count" value="10" min="1" max="30">
+            <input type="number" id="gen-quiz-count" value="10" min="0" max="100">
           </div>
           <div class="form-group">
             <label>Question Types</label>
@@ -621,11 +621,20 @@ ${deck.notes ? escapeHtml(deck.notes) : '<span class="text-muted">No notes added
       return;
     }
 
-    const cardCount = parseInt(document.getElementById('gen-card-count')?.value) || 10;
-    const quizCount = parseInt(document.getElementById('gen-quiz-count')?.value) || 10;
+    const rawCardVal = parseInt(document.getElementById('gen-card-count')?.value, 10);
+    const rawQuizVal = parseInt(document.getElementById('gen-quiz-count')?.value, 10);
+    const cardCount = Number.isNaN(rawCardVal) ? 10 : Math.max(0, Math.min(100, rawCardVal));
+    const quizCount = Number.isNaN(rawQuizVal) ? 10 : Math.max(0, Math.min(100, rawQuizVal));
     const types = [...document.querySelectorAll('#modal-generate .type-checkbox input:checked')].map(cb => cb.value);
 
-    if (types.length === 0) { App.toast('Select at least one question type.', 'error'); return; }
+    if (cardCount === 0 && quizCount === 0) {
+      App.toast('Enter at least 1 flashcard or 1 quiz question.', 'error');
+      return;
+    }
+    if (quizCount > 0 && types.length === 0) {
+      App.toast('Select at least one question type.', 'error');
+      return;
+    }
 
     const statusEl = document.getElementById('gen-status');
     const statusText = statusEl.querySelector('p');
