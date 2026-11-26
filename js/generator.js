@@ -72,7 +72,7 @@ const Generator = (() => {
             messages: [
               {
                 role: 'system',
-                content: 'You are an expert study material generator. You must always return pure valid json without any markdown code fences or text formatting.',
+                content: 'You are an expert study material generator. You must always return pure valid json. You MUST strictly adhere to the exact number of cards and questions requested without stopping early.',
               },
               {
                 role: 'user',
@@ -80,7 +80,8 @@ const Generator = (() => {
               },
             ],
             response_format: { type: 'json_object' },
-            temperature: 0.4,
+            temperature: 0.3,
+            max_tokens: 4096,
           }),
         });
 
@@ -168,8 +169,9 @@ const Generator = (() => {
             body: JSON.stringify({
               contents: [{ parts: [{ text: prompt }] }],
               generationConfig: {
-                temperature: 0.7,
+                temperature: 0.3,
                 topP: 0.9,
+                maxOutputTokens: 4096,
                 responseMimeType: 'application/json',
               },
             }),
@@ -264,14 +266,15 @@ const Generator = (() => {
       processedNotes = processedNotes.slice(0, 12000) + '\n\n[... Note: Subsequent content truncated to fit AI processing limits ...]';
     }
 
-    const prompt = `You are an expert study material generator. Based on the notes below, create ${cardCount} flashcards and ${quizCount} quiz questions.
+    const prompt = `You are an expert study material generator. Based on the notes below, create EXACTLY ${cardCount} flashcards and EXACTLY ${quizCount} quiz questions.
 
 NOTES:
 ${processedNotes}
 
-Requirements:
-1. Create exactly ${cardCount} flashcards.
-2. Create exactly ${quizCount} quiz questions distributed across:
+STRICT COUNT RULES:
+1. The "cards" array MUST contain EXACTLY ${cardCount} items.
+2. The "questions" array MUST contain EXACTLY ${quizCount} items.
+3. Distribute the ${quizCount} questions across these types:
 - ${requestedTypes}
 
 Return a single json object with EXACTLY this structure:
@@ -311,6 +314,7 @@ Return a single json object with EXACTLY this structure:
   ]
 }
 
+Double check that you provided EXACTLY ${cardCount} cards and EXACTLY ${quizCount} questions before returning.
 Return ONLY the raw json object, no markdown codeblocks, no extra explanation.`;
 
     const result = await callAI(prompt, onStatus);
@@ -318,7 +322,7 @@ Return ONLY the raw json object, no markdown codeblocks, no extra explanation.`;
     const rawCards = result.cards || result.flashcards || [];
     const rawQuestions = result.questions || result.quizQuestions || result.quiz || [];
 
-    const cards = rawCards.map(c => ({
+    let cards = rawCards.map(c => ({
       id: Storage.uuid(),
       front: c.front || c.question || c.term || '',
       back: c.back || c.answer || c.definition || '',
@@ -326,16 +330,45 @@ Return ONLY the raw json object, no markdown codeblocks, no extra explanation.`;
       lastReviewed: null,
       timesCorrect: 0,
       timesWrong: 0,
-    }));
+    })).filter(c => c.front && c.back);
 
-    const questions = rawQuestions.map(q => ({
+    let questions = rawQuestions.map(q => ({
       id: Storage.uuid(),
       type: q.type || 'multiple_choice',
       question: q.question || '',
       options: q.options || [],
       answer: q.answer || '',
       explanation: q.explanation || '',
-    }));
+    })).filter(q => q.question && q.answer);
+
+    // Guarantee exact flashcard count
+    while (cards.length < cardCount && questions.length > 0) {
+      const q = questions[cards.length % questions.length];
+      cards.push({
+        id: Storage.uuid(),
+        front: q.question,
+        back: q.answer + (q.explanation ? ` (${q.explanation})` : ''),
+        mastery: 0,
+        lastReviewed: null,
+        timesCorrect: 0,
+        timesWrong: 0,
+      });
+    }
+    cards = cards.slice(0, cardCount);
+
+    // Guarantee exact quiz question count
+    while (questions.length < quizCount && cards.length > 0) {
+      const c = cards[questions.length % cards.length];
+      questions.push({
+        id: Storage.uuid(),
+        type: 'identification',
+        question: `Identify the concept or term: ${c.back}`,
+        options: [],
+        answer: c.front,
+        explanation: `Flashcard reference: ${c.front} — ${c.back}`,
+      });
+    }
+    questions = questions.slice(0, quizCount);
 
     return { cards, questions };
   }

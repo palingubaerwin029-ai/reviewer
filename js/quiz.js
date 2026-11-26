@@ -74,8 +74,13 @@ const Quiz = (() => {
       <div class="quiz-config">
         <div class="card">
           <div class="form-group">
-            <label>Number of Questions</label>
-            <input type="number" id="quiz-count" value="${Math.min(10, deck.quizQuestions.length)}" min="1" max="${deck.quizQuestions.length}">
+            <div style="display:flex;justify-content:space-between;align-items:center;">
+              <label style="margin-bottom:0;">Number of Questions</label>
+              <span id="quiz-count-hint" style="font-size:0.8rem;color:var(--accent);">
+                ${deck.quizQuestions.length} available
+              </span>
+            </div>
+            <input type="number" id="quiz-count" value="${Math.min(10, deck.quizQuestions.length)}" min="1" max="${deck.quizQuestions.length}" style="margin-top:6px;">
           </div>
 
           <div class="form-group">
@@ -120,14 +125,33 @@ const Quiz = (() => {
       timerGroup.style.display = timerToggle.checked ? '' : 'none';
     });
 
-    // Type checkbox toggle styling
+    // Type checkbox toggle styling & dynamic count sync
+    function updateAvailableCount() {
+      const selectedTypes = [...container.querySelectorAll('.type-checkbox input:checked')].map(cb => cb.value);
+      const available = deck.quizQuestions.filter(q => selectedTypes.includes(q.type)).length;
+      const countInput = document.getElementById('quiz-count');
+      const countHint = document.getElementById('quiz-count-hint');
+      if (countInput) {
+        countInput.max = Math.max(available, 1);
+        if (parseInt(countInput.value) > available && available > 0) {
+          countInput.value = available;
+        }
+      }
+      if (countHint) {
+        countHint.textContent = `${available} available for selected types`;
+      }
+    }
+
     container.querySelectorAll('.type-checkbox').forEach(el => {
       const cb = el.querySelector('input');
       el.addEventListener('click', (e) => {
         if (e.target !== cb) cb.checked = !cb.checked;
         el.classList.toggle('checked', cb.checked);
+        updateAvailableCount();
       });
     });
+
+    updateAvailableCount();
   }
 
   // ---- Start Quiz ----
@@ -144,16 +168,20 @@ const Quiz = (() => {
 
     // Filter and shuffle questions
     let pool = deck.quizQuestions.filter(q => types.includes(q.type));
+    if (pool.length === 0) {
+      App.toast('No questions match the selected types. Please select more question types.', 'error');
+      return;
+    }
+
+    if (pool.length < count) {
+      App.toast(`Starting quiz with all ${pool.length} available questions matching selected types.`, 'info');
+    }
+
     for (let i = pool.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
       [pool[i], pool[j]] = [pool[j], pool[i]];
     }
     const questions = pool.slice(0, count);
-
-    if (questions.length === 0) {
-      App.toast('No questions match the selected types.', 'error');
-      return;
-    }
 
     state = {
       deck,
