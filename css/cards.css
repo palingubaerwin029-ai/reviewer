@@ -287,25 +287,66 @@
 
 /* ---- Responsive ---- */
 @media (max-width: 640px) {
+  .flashcard-study {
+    gap: 16px;
+  }
+
   .flip-card {
-    height: 260px;
+    height: 250px;
+  }
+
+  .flip-card-front,
+  .flip-card-back {
+    padding: 24px 18px;
   }
 
   .flip-card-text {
-    font-size: 1.1rem;
+    font-size: 1.05rem;
+  }
+
+  .flip-card-back .flip-card-text {
+    font-size: 1rem;
   }
 
   .grade-controls {
-    flex-direction: column;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
     width: 100%;
   }
 
   .grade-btn {
     width: 100%;
+    padding: 14px 10px;
+    font-size: 0.9rem;
     justify-content: center;
   }
 
+  .study-controls {
+    width: 100%;
+  }
+
+  .study-btn.nav-btn {
+    flex: 1;
+  }
+
+  .session-summary {
+    padding: 20px 10px;
+  }
+
   .session-stats {
-    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .session-stat {
+    padding: 14px;
+  }
+
+  .session-stat .value {
+    font-size: 1.6rem;
+  }
+
+  .card-list-item {
+    padding: 12px;
   }
 }

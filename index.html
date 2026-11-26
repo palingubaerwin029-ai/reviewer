@@ -35,8 +35,15 @@
 <body>
   <div class="app-layout">
 
-    <!-- Mobile Menu Toggle -->
-    <button class="menu-toggle" aria-label="Toggle menu">☰</button>
+    <!-- Mobile Top Header -->
+    <header class="mobile-header">
+      <button class="menu-toggle" aria-label="Toggle menu">☰</button>
+      <div class="mobile-logo" onclick="App.navigate('dashboard')">
+        <span>📚</span>
+        <span>ReviewerPro</span>
+      </div>
+      <button class="mobile-theme-btn" onclick="App.toggleTheme()" aria-label="Toggle theme">🌙</button>
+    </header>
 
     <!-- Sidebar Overlay (mobile) -->
     <div class="sidebar-overlay"></div>

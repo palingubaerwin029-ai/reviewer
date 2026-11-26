@@ -124,8 +124,8 @@ const Progress = (() => {
             <h3 class="card-title">🕒 Recent Quizzes</h3>
           </div>
           ${history.length === 0 ? '<p class="text-muted text-center">No quizzes taken yet.</p>' : `
-            <div style="overflow-x:auto;">
-              <table style="width:100%;border-collapse:collapse;font-size:0.9rem;">
+            <div style="overflow-x:auto;-webkit-overflow-scrolling:touch;">
+              <table style="width:100%;border-collapse:collapse;font-size:0.875rem;white-space:nowrap;">
                 <thead>
                   <tr style="text-align:left;border-bottom:1px solid var(--border);">
                     <th style="padding:10px;">Date</th>
