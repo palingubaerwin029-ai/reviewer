@@ -4,9 +4,17 @@
 
 const Generator = (() => {
   const GEMINI_FALLBACK_MODELS = ['gemini-3.8-flash', 'gemini-2.5-flash', 'gemini-1.5-flash'];
+  let cachedGroqModels = null;
+  let cachedGroqModelsAt = 0;
+  const modelCooldownUntil = {};
+  let lastGroqModelUsed = null;
+  let lastCallTokens = 0;
 
   // ---- Dynamically query live active models from Groq ----
   async function fetchGroqChatModels(apiKey) {
+    if (cachedGroqModels && (Date.now() - cachedGroqModelsAt) < 300000) {
+      return cachedGroqModels;
+    }
     try {
       const response = await fetch('https://api.groq.com/openai/v1/models', {
         headers: {
@@ -16,11 +24,13 @@ const Generator = (() => {
       if (response.ok) {
         const data = await response.json();
         const allModels = (data.data || []).map(m => m.id);
-        const decommissioned = ['gemma2', 'whisper', 'guard', 'mixtral', 'llama-3.3-70b-versatile'];
+        const excluded = ['gemma2', 'whisper', 'guard', 'mixtral', 'llama-3.3-70b-versatile', 'tts', 'playai', 'distil', 'orpheus'];
         const chatModels = allModels.filter(id =>
-          !decommissioned.some(dec => id.includes(dec))
+          !excluded.some(ex => id.toLowerCase().includes(ex))
         );
         if (chatModels.length > 0) {
+          cachedGroqModels = chatModels;
+          cachedGroqModelsAt = Date.now();
           return chatModels;
         }
       }
@@ -30,7 +40,17 @@ const Generator = (() => {
     return ['llama-3.1-8b-instant'];
   }
 
-  // ---- Groq LLM API ----
+  function parseJsonResponse(text) {
+    try {
+      return JSON.parse(text);
+    } catch {
+      const match = text.match(/\[[\s\S]*\]|\{[\s\S]*\}/);
+      if (match) return JSON.parse(match[0]);
+      throw new Error('Could not parse AI response as JSON');
+    }
+  }
+
+  // ---- Groq LLM API (with multi-model 429 rotation) ----
   async function callGroq(prompt, onStatus) {
     const settings = Storage.getSettings();
     const apiKey = (settings.groqApiKey || '').trim();
@@ -38,10 +58,8 @@ const Generator = (() => {
       throw new Error('No Groq API key set. Please add your free Groq API key in Settings.');
     }
 
-    onStatus?.('Verifying active Groq models...');
     const liveModels = await fetchGroqChatModels(apiKey);
 
-    // Pick best active model: preferred if active, else find llama-3.1-8b or first active
     let preferred = settings.groqModel;
     if (!preferred || !liveModels.includes(preferred)) {
       preferred = liveModels.find(m => m.includes('llama-3.1-8b')) ||
@@ -49,14 +67,31 @@ const Generator = (() => {
                   liveModels[0];
     }
 
-    const modelsToTry = [preferred, ...liveModels.filter(m => m !== preferred)];
+    const now = Date.now();
+    const ordered = [preferred, ...liveModels.filter(m => m !== preferred)];
+    // Prioritize models not currently in 429 cooldown
+    const readyModels = ordered.filter(m => (modelCooldownUntil[m] || 0) <= now);
+    const coolingModels = ordered
+      .filter(m => (modelCooldownUntil[m] || 0) > now)
+      .sort((a, b) => (modelCooldownUntil[a] || 0) - (modelCooldownUntil[b] || 0));
+    const modelsToTry = [...readyModels, ...coolingModels];
+
     let lastError = null;
 
     for (let i = 0; i < modelsToTry.length; i++) {
       const model = modelsToTry[i];
+      const cooldownRemaining = (modelCooldownUntil[model] || 0) - Date.now();
+      if (cooldownRemaining > 0 && readyModels.length === 0 && i === 0) {
+        const waitMs = Math.min(cooldownRemaining, 10000);
+        onStatus?.(`Rate limit cooldown (${Math.ceil(waitMs / 1000)}s)...`);
+        await new Promise(r => setTimeout(r, waitMs));
+      } else if (cooldownRemaining > 0 && readyModels.length > 0) {
+        continue;
+      }
+
       try {
         if (i > 0) {
-          onStatus?.(`Trying alternative Groq model (${model})...`);
+          onStatus?.(`Rotating to Groq model (${model})...`);
         } else {
           onStatus?.(`Generating with Groq (${model})...`);
         }
@@ -94,12 +129,21 @@ const Generator = (() => {
             throw new Error('Invalid Groq API key. Please check your API key in Settings.');
           }
 
-          if (response.status === 429 || msg.toLowerCase().includes('rate limit') || msg.toLowerCase().includes('tokens per minute')) {
-            const retryAfter = parseFloat(response.headers.get('retry-after')) || 4;
+          const isRateLimit = response.status === 429 ||
+                              msg.toLowerCase().includes('rate limit') ||
+                              msg.toLowerCase().includes('tokens per minute');
+
+          if (isRateLimit) {
+            const retryAfter = parseFloat(response.headers.get('retry-after')) || 12;
+            modelCooldownUntil[model] = Date.now() + Math.min(Math.max(retryAfter * 1000, 5000), 30000);
+            lastError = new Error('Groq rate limit reached.');
+            if (i < modelsToTry.length - 1) {
+              continue; // immediately rotate to next model with its own TPM bucket
+            }
+            // All models rate-limited: wait briefly and retry this model once
             const waitMs = Math.min(Math.max(retryAfter * 1000, 3000), 10000);
             onStatus?.(`Rate limit pause (${Math.ceil(waitMs / 1000)}s)...`);
             await new Promise(r => setTimeout(r, waitMs));
-            // Retry once on the same model before moving on
             const retryRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
               method: 'POST',
               headers: {
@@ -121,13 +165,12 @@ const Generator = (() => {
               const retryData = await retryRes.json();
               const retryText = retryData.choices?.[0]?.message?.content;
               if (retryText) {
-                try { return JSON.parse(retryText); } catch {
-                  const m = retryText.match(/\[[\s\S]*\]|\{[\s\S]*\}/);
-                  if (m) return JSON.parse(m[0]);
-                }
+                lastGroqModelUsed = model;
+                lastCallTokens = retryData.usage?.total_tokens || Math.ceil((prompt.length + retryText.length) / 4);
+                return parseJsonResponse(retryText);
               }
             }
-            throw new Error('Groq rate limit reached. Please wait a few seconds and try again.');
+            throw new Error('Groq rate limit reached across available models. Please wait a few seconds and try again.');
           }
 
           const isModelUnavailable = response.status === 404 ||
@@ -138,7 +181,7 @@ const Generator = (() => {
 
           if (isModelUnavailable && i < modelsToTry.length - 1) {
             lastError = new Error(msg);
-            continue; // try next live model
+            continue;
           }
 
           throw new Error(msg);
@@ -148,21 +191,17 @@ const Generator = (() => {
         const text = data.choices?.[0]?.message?.content;
         if (!text) throw new Error('Empty response from Groq API');
 
-        // Remember the model that worked
-        if (model !== settings.groqModel) {
+        lastGroqModelUsed = model;
+        lastCallTokens = data.usage?.total_tokens || Math.ceil((prompt.length + text.length) / 4);
+
+        if (model !== settings.groqModel && i === 0) {
           Storage.saveSettings({ groqModel: model });
         }
 
-        try {
-          return JSON.parse(text);
-        } catch {
-          const match = text.match(/\[[\s\S]*\]|\{[\s\S]*\}/);
-          if (match) return JSON.parse(match[0]);
-          throw new Error('Could not parse Groq response as JSON');
-        }
+        return parseJsonResponse(text);
       } catch (err) {
         lastError = err;
-        if (err.message.includes('API key') || err.message.includes('rate limit')) throw err;
+        if (err.message.includes('API key')) throw err;
         if (i < modelsToTry.length - 1) {
           continue;
         }
@@ -269,15 +308,31 @@ const Generator = (() => {
     throw lastError || new Error('All Gemini models are currently experiencing high demand. Try switching to Groq in Settings.');
   }
 
-  // ---- Unified LLM Dispatcher ----
+  // ---- Unified LLM Dispatcher (with cross-provider fallback) ----
   async function callAI(prompt, onStatus) {
     const settings = Storage.getSettings();
     const provider = settings.aiProvider || 'groq';
 
     if (provider === 'gemini') {
-      return callGemini(prompt, onStatus);
+      try {
+        return await callGemini(prompt, onStatus);
+      } catch (err) {
+        if ((settings.groqApiKey || '').trim() && !err.message.includes('API key')) {
+          onStatus?.('Gemini busy, switching to Groq...');
+          return callGroq(prompt, onStatus);
+        }
+        throw err;
+      }
     } else {
-      return callGroq(prompt, onStatus);
+      try {
+        return await callGroq(prompt, onStatus);
+      } catch (err) {
+        if ((settings.apiKey || '').trim() && !err.message.includes('API key')) {
+          onStatus?.('Groq rate-limited, switching to Gemini...');
+          return callGemini(prompt, onStatus);
+        }
+        throw err;
+      }
     }
   }
 
@@ -410,14 +465,18 @@ const Generator = (() => {
       return { cards: [], questions: [] };
     }
 
-    const chunks = splitIntoChunks(notes, 6000);
+    const chunks = splitIntoChunks(notes, 2800);
     const CARD_BATCH_LIMIT = 12;
     const QUIZ_BATCH_LIMIT = 10;
 
     const allCards = [];
     const allQuestions = [];
     let chunkIdx = 0;
-    let totalCalls = 0;
+
+    async function paceBetweenBatches() {
+      const pauseMs = lastCallTokens >= 1400 ? 2800 : 1400;
+      await new Promise(r => setTimeout(r, pauseMs));
+    }
 
     // 1. Generate exact number of flashcards (only if cardCount > 0)
     if (cardCount > 0) {
@@ -425,14 +484,13 @@ const Generator = (() => {
       let cardRounds = 0;
       while (allCards.length < cardCount && cardRounds < maxCardRounds) {
         cardRounds++;
-        totalCalls++;
         const rem = cardCount - allCards.length;
         const batchSize = Math.min(rem, CARD_BATCH_LIMIT);
         const currentChunk = chunks[chunkIdx % chunks.length];
         chunkIdx++;
 
         onStatus?.(`Generating flashcards (${allCards.length}/${cardCount})...`);
-        const avoidList = allCards.slice(-12).map(c => c.front.slice(0, 40));
+        const avoidList = allCards.slice(-8).map(c => c.front.slice(0, 24));
 
         try {
           const batch = await generateCardsBatch(currentChunk, batchSize, onStatus, avoidList);
@@ -450,14 +508,14 @@ const Generator = (() => {
         }
 
         if (allCards.length < cardCount) {
-          await new Promise(r => setTimeout(r, 1000));
+          await paceBetweenBatches();
         }
       }
     }
 
     // Pause before quiz generation if both were requested
     if (cardCount > 0 && quizCount > 0) {
-      await new Promise(r => setTimeout(r, 1000));
+      await paceBetweenBatches();
     }
 
     // 2. Generate exact number of quiz questions (only if quizCount > 0)
@@ -466,14 +524,13 @@ const Generator = (() => {
       let quizRounds = 0;
       while (allQuestions.length < quizCount && quizRounds < maxQuizRounds) {
         quizRounds++;
-        totalCalls++;
         const rem = quizCount - allQuestions.length;
         const batchSize = Math.min(rem, QUIZ_BATCH_LIMIT);
         const currentChunk = chunks[chunkIdx % chunks.length];
         chunkIdx++;
 
         onStatus?.(`Generating quiz questions (${allQuestions.length}/${quizCount})...`);
-        const avoidList = allQuestions.slice(-12).map(q => q.question.slice(0, 40));
+        const avoidList = allQuestions.slice(-8).map(q => q.question.slice(0, 24));
 
         try {
           const batch = await generateQuizBatch(currentChunk, batchSize, types, onStatus, avoidList);
@@ -489,7 +546,7 @@ const Generator = (() => {
         }
 
         if (allQuestions.length < quizCount) {
-          await new Promise(r => setTimeout(r, 1000));
+          await paceBetweenBatches();
         }
       }
     }
