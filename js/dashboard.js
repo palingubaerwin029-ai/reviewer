@@ -56,11 +56,8 @@ const Dashboard = (() => {
             <h3 class="card-title">⚡ Quick Actions</h3>
           </div>
           <div class="btn-group flex-col">
-            <button class="btn btn-primary w-full" onclick="App.navigate('reviewer')">
-              ➕ Create New Reviewer
-            </button>
-            <button class="btn btn-secondary w-full" onclick="App.navigate('reviewer'); setTimeout(() => Reviewer.showCreateModal(true), 150);">
-              📄 Upload File from Storage
+            <button class="btn btn-primary w-full" onclick="App.navigate('reviewer'); setTimeout(() => Reviewer.showCreateModal(false), 120);">
+              ➕ Create New Deck
             </button>
             ${decks.length > 0 ? `
               <button class="btn btn-secondary w-full" onclick="App.navigate('flashcards')">
@@ -89,7 +86,7 @@ const Dashboard = (() => {
               <div class="card-list-item" style="cursor:pointer;" onclick="App.navigate('reviewer','${d.id}')">
                 <div class="card-list-content">
                   <div class="card-list-front">${escapeHtml(d.name)}</div>
-                  <div class="card-list-back">${d.cards.length} cards · ${stats.masteryPct}% mastered</div>
+                  <div class="card-list-back">${d.cards.length} cards · ${d.quizQuestions.length} quizzes · ${stats.masteryPct}% mastered</div>
                 </div>
                 <div class="tag ${stats.masteryPct >= 80 ? 'green' : stats.masteryPct >= 50 ? 'yellow' : ''}">${stats.masteryPct}%</div>
               </div>

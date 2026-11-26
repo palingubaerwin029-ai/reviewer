@@ -22,7 +22,6 @@ const Reviewer = (() => {
           <p>Create and manage your study decks.</p>
         </div>
         <div class="btn-group">
-          <button class="btn btn-secondary" onclick="Reviewer.showCreateModal(true)">📄 Upload File</button>
           <button class="btn btn-primary" onclick="Reviewer.showCreateModal(false)">➕ New Deck</button>
         </div>
       </div>
@@ -31,10 +30,9 @@ const Reviewer = (() => {
         <div class="empty-state">
           <div style="font-size:4rem;margin-bottom:16px;">📂</div>
           <h3>No decks yet</h3>
-          <p>Create your first deck by pasting notes or uploading a file from your device storage.</p>
+          <p>Create your first deck by pasting notes or uploading a file.</p>
           <div class="btn-group" style="justify-content:center;margin-top:16px;">
             <button class="btn btn-primary btn-lg" onclick="Reviewer.showCreateModal(false)">➕ Create Deck</button>
-            <button class="btn btn-secondary btn-lg" onclick="Reviewer.showCreateModal(true)">📄 Upload from Storage</button>
           </div>
         </div>
       ` : `
@@ -153,8 +151,7 @@ const Reviewer = (() => {
           </div>
         </div>
         <div class="btn-group">
-          <button class="btn btn-secondary" onclick="Reviewer.showUploadModal('${deckId}')">📄 Upload File</button>
-          <button class="btn btn-primary" onclick="Reviewer.generateContent('${deckId}')">🤖 Generate Cards</button>
+          <button class="btn btn-primary" onclick="Reviewer.generateContent('${deckId}')">🤖 Generate</button>
           <button class="btn btn-danger btn-sm" onclick="Reviewer.confirmDeleteDeck('${deckId}')">🗑️ Delete</button>
         </div>
       </div>
@@ -202,17 +199,6 @@ const Reviewer = (() => {
               </p>
             </div>
             <button class="modal-close" onclick="App.hideModal('modal-generate')">&times;</button>
-          </div>
-
-          <div class="form-group ${settings.groqApiKey ? 'hidden' : ''}" id="gen-key-group" style="background:var(--bg-input);padding:14px;border-radius:var(--radius-sm);border:1px solid var(--border);">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
-              <label style="margin-bottom:0;font-weight:600;color:var(--text-primary);">⚡ Groq API Key</label>
-              <a href="https://console.groq.com/keys" target="_blank" style="font-size:0.8rem;color:var(--accent);">Get Free Key (console.groq.com) →</a>
-            </div>
-            <input type="password" id="modal-groq-key" value="${escapeHtml(settings.groqApiKey || '')}" placeholder="Paste gsk_... key here">
-            <p style="font-size:0.75rem;color:var(--text-muted);margin-top:6px;margin-bottom:0;">
-              Free and instant — automatically saved so you only have to enter it once.
-            </p>
           </div>
 
           <div class="form-group">

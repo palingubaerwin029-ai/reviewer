@@ -122,10 +122,10 @@ const Generator = (() => {
     const settings = Storage.getSettings();
     const apiKey = (settings.groqApiKey || '').trim();
     const envStatus = await getServerEnvStatus();
-    const useServerProxy = !apiKey && envStatus.hasGroqEnv;
+    const useServerProxy = envStatus.hasGroqEnv;
 
     if (!apiKey && !useServerProxy) {
-      throw new Error('No Groq API key set. Add GROQ_API_KEY in Vercel env or enter your key in Settings.');
+      throw new Error('No Groq API key set. Add GROQ_API_KEY in Vercel env.');
     }
 
     const liveModels = await fetchGroqChatModels(apiKey, useServerProxy);
@@ -249,10 +249,10 @@ const Generator = (() => {
     const settings = Storage.getSettings();
     const apiKey = (settings.apiKey || '').trim();
     const envStatus = await getServerEnvStatus();
-    const useServerProxy = !apiKey && envStatus.hasGeminiEnv;
+    const useServerProxy = envStatus.hasGeminiEnv;
 
     if (!apiKey && !useServerProxy) {
-      throw new Error('No Gemini API key set. Add GEMINI_API_KEY in Vercel env or enter your key in Settings.');
+      throw new Error('No Gemini API key set. Add GEMINI_API_KEY in Vercel env.');
     }
 
     const preferredModel = settings.model || 'gemini-3.8-flash';

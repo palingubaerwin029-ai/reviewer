@@ -15,69 +15,27 @@ const Settings = (() => {
       </div>
 
       <div style="max-width:600px;">
-        <!-- AI Provider Selection -->
+        <!-- AI Engine -->
         <div class="card mb-3">
           <div class="card-header">
-            <h3 class="card-title">🤖 AI Provider</h3>
+            <h3 class="card-title">🤖 AI Engine</h3>
           </div>
           <div class="form-group">
-            <label>Select AI Engine</label>
+            <label>Provider</label>
             <select id="settings-provider" onchange="Settings.onProviderChange()">
-              <option value="groq" ${provider === 'groq' ? 'selected' : ''}>⚡ Groq (Ultra-Fast LPU & Free Tier) — Recommended</option>
+              <option value="groq" ${provider === 'groq' ? 'selected' : ''}>⚡ Groq (Ultra-Fast) — Recommended</option>
               <option value="gemini" ${provider === 'gemini' ? 'selected' : ''}>✨ Google Gemini</option>
             </select>
           </div>
-        </div>
-
-        <!-- Groq Configuration -->
-        <div class="card mb-3 ${provider !== 'groq' ? 'hidden' : ''}" id="section-groq">
-          <div class="card-header">
-            <h3 class="card-title">⚡ Groq Configuration</h3>
-          </div>
-          <p style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:12px;">
-            Groq provides lightning-fast open-source LLM inference with a free tier.
-            <a href="https://console.groq.com/keys" target="_blank">Get a free Groq API key →</a>
-          </p>
-          <div class="form-group">
-            <label>Groq API Key (starts with gsk_)</label>
-            <div style="display:flex;gap:8px;">
-              <input type="password" id="settings-groq-key" value="${escapeHtml(settings.groqApiKey || '')}" placeholder="gsk_...">
-              <button class="btn btn-sm btn-secondary" onclick="Settings.toggleKeyVisibility('settings-groq-key')" type="button">👁️</button>
-            </div>
-          </div>
-          <div class="form-group" style="margin-top:12px;margin-bottom:0;">
+          <div class="form-group ${provider !== 'groq' ? 'hidden' : ''}" id="section-groq" style="margin-bottom:0;">
             <label>Groq Model</label>
             <select id="settings-groq-model">
-              <option value="llama-3.1-8b-instant" ${settings.groqModel === 'llama-3.1-8b-instant' ? 'selected' : ''}>llama-3.1-8b-instant (Recommended — Fastest & Active)</option>
+              <option value="llama-3.1-8b-instant" ${settings.groqModel === 'llama-3.1-8b-instant' ? 'selected' : ''}>llama-3.1-8b-instant (Recommended — Fastest)</option>
               <option value="llama-3.2-11b-vision-preview" ${settings.groqModel === 'llama-3.2-11b-vision-preview' ? 'selected' : ''}>llama-3.2-11b-vision-preview</option>
               <option value="llama-3.2-3b-preview" ${settings.groqModel === 'llama-3.2-3b-preview' ? 'selected' : ''}>llama-3.2-3b-preview</option>
             </select>
           </div>
-          <div style="margin-top:12px;" id="settings-groq-status">
-            ${settings.groqApiKey ?
-              '<span class="tag green">✅ Groq configured (custom key)</span>' :
-              '<span class="tag red">⚠️ Enter your Groq API key above</span>'
-            }
-          </div>
-        </div>
-
-        <!-- Gemini Configuration -->
-        <div class="card mb-3 ${provider !== 'gemini' ? 'hidden' : ''}" id="section-gemini">
-          <div class="card-header">
-            <h3 class="card-title">✨ Google Gemini Configuration</h3>
-          </div>
-          <p style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:12px;">
-            Requires a Gemini API key from Google AI Studio. 
-            <a href="https://aistudio.google.com/apikey" target="_blank">Get a free API key →</a>
-          </p>
-          <div class="form-group">
-            <label>Gemini API Key</label>
-            <div style="display:flex;gap:8px;">
-              <input type="password" id="settings-api-key" value="${escapeHtml(settings.apiKey || '')}" placeholder="AIzaSy...">
-              <button class="btn btn-sm btn-secondary" onclick="Settings.toggleKeyVisibility('settings-api-key')" type="button">👁️</button>
-            </div>
-          </div>
-          <div class="form-group" style="margin-top:12px;margin-bottom:0;">
+          <div class="form-group ${provider !== 'gemini' ? 'hidden' : ''}" id="section-gemini" style="margin-bottom:0;">
             <label>Gemini Model</label>
             <select id="settings-model">
               <option value="gemini-3.8-flash" ${settings.model === 'gemini-3.8-flash' ? 'selected' : ''}>gemini-3.8-flash (Recommended)</option>
@@ -85,11 +43,8 @@ const Settings = (() => {
               <option value="gemini-1.5-pro" ${settings.model === 'gemini-1.5-pro' ? 'selected' : ''}>gemini-1.5-pro</option>
             </select>
           </div>
-          <div style="margin-top:12px;" id="settings-gemini-status">
-            ${settings.apiKey ?
-              '<span class="tag green">✅ Gemini configured (custom key)</span>' :
-              '<span class="tag red">⚠️ No Gemini key set</span>'
-            }
+          <div style="margin-top:12px;" id="settings-ai-status">
+            <span class="tag green">✅ API keys managed securely on server</span>
           </div>
         </div>
 
@@ -155,14 +110,14 @@ const Settings = (() => {
     // Show server environment variable status if configured on Vercel
     if (typeof Generator !== 'undefined' && Generator.getServerEnvStatus) {
       Generator.getServerEnvStatus().then(env => {
-        const groqStatus = document.getElementById('settings-groq-status');
-        if (groqStatus && !settings.groqApiKey && env.hasGroqEnv) {
-          groqStatus.innerHTML = '<span class="tag green">✅ Using server env (GROQ_API_KEY)</span>';
-        }
-        const geminiStatus = document.getElementById('settings-gemini-status');
-        if (geminiStatus && !settings.apiKey && env.hasGeminiEnv) {
-          geminiStatus.innerHTML = '<span class="tag green">✅ Using server env (GEMINI_API_KEY)</span>';
-        }
+        const aiStatus = document.getElementById('settings-ai-status');
+        if (!aiStatus) return;
+        const active = [];
+        if (env.hasGroqEnv) active.push('Groq');
+        if (env.hasGeminiEnv) active.push('Gemini');
+        aiStatus.innerHTML = active.length > 0
+          ? `<span class="tag green">✅ Server env active (${active.join(' + ')})</span>`
+          : '<span class="tag red">⚠️ Server env keys not detected</span>';
       });
     }
   }
@@ -177,15 +132,13 @@ const Settings = (() => {
 
   function save() {
     const aiProvider = document.getElementById('settings-provider')?.value || 'groq';
-    const groqApiKey = document.getElementById('settings-groq-key')?.value.trim() || '';
     const groqModel = document.getElementById('settings-groq-model')?.value || 'llama-3.1-8b-instant';
-    const apiKey = document.getElementById('settings-api-key')?.value.trim() || '';
     const model = document.getElementById('settings-model')?.value || 'gemini-3.8-flash';
     const theme = document.getElementById('settings-theme')?.checked ? 'dark' : 'light';
     const quizTimer = document.getElementById('settings-timer')?.checked || false;
     const timerSeconds = parseInt(document.getElementById('settings-timer-seconds')?.value) || 30;
 
-    Storage.saveSettings({ aiProvider, groqApiKey, groqModel, apiKey, model, theme, quizTimer, timerSeconds });
+    Storage.saveSettings({ aiProvider, groqApiKey: '', groqModel, apiKey: '', model, theme, quizTimer, timerSeconds });
     document.documentElement.setAttribute('data-theme', theme);
     App.toast('Settings saved!', 'success');
     render();
